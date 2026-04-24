@@ -67,15 +67,28 @@ def add_transaction(
 
 def get_transactions(month: str | None = None) -> pd.DataFrame:
     """Fetch transactions, optionally filtered by month ('YYYY-MM')."""
-    ws = get_or_create_worksheet("Transactions", TRANSACTION_HEADERS)
-    records = ws.get_all_records()
+    try:
+        ws = get_or_create_worksheet("Transactions", TRANSACTION_HEADERS)
+        records = ws.get_all_records()
+    except gspread.exceptions.APIError as e:
+        import streamlit as _st
+        _st.error(
+            "🔑 **Google Sheets Access Error**\n\n"
+            "The app cannot access your Google Sheet. Please make sure you have shared "
+            "the sheet with the service account:\n\n"
+            f"`finance-os@nexgen-fintrack.iam.gserviceaccount.com`\n\n"
+            "**Steps:** Open your Google Sheet → Share → Add above email as Editor → Share"
+        )
+        _st.stop()
+    except Exception as e:
+        import streamlit as _st
+        _st.error(f"❌ Database error: {e}")
+        _st.stop()
 
     if not records:
         return pd.DataFrame(columns=TRANSACTION_HEADERS)
 
     df = pd.DataFrame(records)
-
-    # Ensure Amount is numeric
     df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce").fillna(0)
 
     if month:
