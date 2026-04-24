@@ -171,8 +171,41 @@ with st.sidebar:
 # HEADER
 # ═══════════════════════════════════════════════════════════════
 st.markdown('<p class="app-title">💰 Fintrack</p>', unsafe_allow_html=True)
+
+# ─── Inline controls (visible on mobile without sidebar) ─────
+ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
+with ctrl1:
+    month_options = get_month_options(6)
+    month_labels  = {k: get_month_label(k) for k in month_options}
+    selected_month = st.selectbox(
+        "📅 Month",
+        options=month_options,
+        format_func=lambda x: month_labels[x],
+        index=0,
+        key="month_selector_main",
+        label_visibility="collapsed",
+    )
+with ctrl2:
+    _cur_bud = db.get_budget(selected_month)
+    with st.form("budget_inline_form", clear_on_submit=False):
+        _bud_val = st.number_input(
+            "Budget (₹)", min_value=0, max_value=10_000_000,
+            value=int(_cur_bud) if _cur_bud > 0 else 25000,
+            step=1000, key="budget_inline_input",
+            label_visibility="collapsed",
+        )
+        if st.form_submit_button("🎯 Set Budget"):
+            db.set_budget(selected_month, _bud_val)
+            st.toast(f"Budget → {format_inr(_bud_val)}", icon="✅")
+            st.rerun()
+with ctrl3:
+    st.markdown(
+        f"<div style='text-align:right;padding-top:8px;font-size:0.7rem;color:#9BA1B0;'>{DB_MODE}</div>",
+        unsafe_allow_html=True,
+    )
+
 st.markdown(
-    f'<p class="app-subtitle">Fintrack — Your financial command center | {get_month_label(selected_month)}</p>',
+    f'<p class="app-subtitle">Your financial command center | {get_month_label(selected_month)}</p>',
     unsafe_allow_html=True,
 )
 
