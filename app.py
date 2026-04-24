@@ -68,11 +68,22 @@ try:
 except FileNotFoundError:
     pass
 
-# ─── Setup Wizard (first-time users) ─────────────────────────
-from setup_wizard import is_setup_complete, show_wizard
-if not is_setup_complete():
-    show_wizard()
-    st.stop()  # Don't render the rest of the app until setup is done
+# ─── Auth gate ──────────────────────────────────────
+from auth import is_logged_in, get_current_user, show_login, logout
+if not is_logged_in():
+    show_login(db)
+    st.stop()
+
+CURRENT_USER      = get_current_user()
+CURRENT_USER_NAME = st.session_state.get("ft_user_name", CURRENT_USER)
+
+# Run 1-year cleanup silently on login (once per session)
+if not st.session_state.get("_cleanup_done"):
+    try:
+        db.cleanup_old_data(CURRENT_USER)
+    except Exception:
+        pass
+    st.session_state["_cleanup_done"] = True
 
 # ═══════════════════════════════════════════════════════════════
 # PLOTLY THEME
@@ -105,42 +116,8 @@ INVEST_CATS   = get_investment_categories(db)
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("## 💰 Fintrack")
-    st.markdown("---")
-
-    # Month selector
-    month_options = get_month_options(6)
-    month_labels = {k: get_month_label(k) for k in month_options}
-    selected_month = st.selectbox(
-        "📅 Select Month",
-        options=month_options,
-        format_func=lambda x: month_labels[x],
-        index=0,
-        key="month_selector",
-    )
-
-    st.markdown("---")
-
-    # Budget setter
-    st.markdown("### 🎯 Monthly Budget")
-    current_budget = db.get_budget(selected_month)
-
-    with st.form("budget_form", clear_on_submit=False):
-        budget_amount = st.number_input(
-            "Total Budget (₹)",
-            min_value=0,
-            max_value=10_000_000,
-            value=int(current_budget) if current_budget > 0 else 25000,
-            step=1000,
-            key="budget_input",
-        )
-        budget_submitted = st.form_submit_button("💾 Save Budget", use_container_width=True)
-
-    if budget_submitted:
-        db.set_budget(selected_month, budget_amount)
-        st.toast(f"Budget set to {format_inr(budget_amount)}!", icon="✅")
-        st.rerun()
-
+    st.markdown(f"## 💰 Fintrack")
+    st.markdown(f"**👤 {CURRENT_USER_NAME}**")
     st.markdown("---")
 
     # Quick add from sidebar
@@ -155,6 +132,7 @@ with st.sidebar:
         db.add_transaction(
             date.today().strftime("%Y-%m-%d"),
             q_category, q_amount, "Expense", q_note,
+            username=CURRENT_USER,
         )
         st.toast(f"✅ {format_inr(q_amount)} added!", icon="💸")
         st.rerun()
@@ -162,10 +140,12 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(
         f"<div style='text-align:center;color:#9BA1B0;font-size:0.75rem;'>"
-        f"Fintrack v2.0 · Made with ❤️ by Shanky<br>"
-        f"<span style='color:#6C63FF;'>{DB_MODE}</span></div>",
+        f"Fintrack v2.0 · <span style='color:#6C63FF;'>{DB_MODE}</span></div>",
         unsafe_allow_html=True,
     )
+    if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+        logout()
+
 
 # ═══════════════════════════════════════════════════════════════
 # HEADER
@@ -212,11 +192,11 @@ st.markdown(
 # ═══════════════════════════════════════════════════════════════
 # LOAD DATA
 # ═══════════════════════════════════════════════════════════════
-expenses_df     = db.get_expenses(selected_month)
-investments_df  = db.get_investments(selected_month)
-all_txns_df     = db.get_transactions(selected_month)
-budget_val      = db.get_budget(selected_month)
-category_limits = db.get_category_limits()
+expenses_df     = db.get_expenses(selected_month, CURRENT_USER)
+investments_df  = db.get_investments(selected_month, CURRENT_USER)
+all_txns_df     = db.get_transactions(selected_month, CURRENT_USER)
+budget_val      = db.get_budget(selected_month, CURRENT_USER)
+category_limits = db.get_category_limits(CURRENT_USER)
 
 spent     = total_spent(expenses_df)
 invested  = total_invested(investments_df)

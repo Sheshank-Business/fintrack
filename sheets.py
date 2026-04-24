@@ -18,9 +18,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-TRANSACTION_HEADERS = ["Date", "Category", "Amount", "Type", "Note"]
-BUDGET_HEADERS = ["Month", "Budget"]
+TRANSACTION_HEADERS = ["Username", "Date", "Category", "Amount", "Type", "Note"]
+BUDGET_HEADERS = ["UserMonth", "Month", "Budget", "Username"]
 CONFIG_HEADERS = ["Key", "Value"]
+USERS_HEADERS  = ["Username", "Name", "PinHash"]
 
 
 # ─── Connection ──────────────────────────────────────────────────
@@ -81,15 +82,16 @@ def add_transaction(
     amount: float,
     txn_type: str,
     note: str = "",
+    username: str = "default",
 ) -> None:
     """Add a transaction row to the Transactions sheet."""
     ws = get_or_create_worksheet("Transactions", TRANSACTION_HEADERS)
-    ws.append_row([date, category, float(amount), txn_type, note])
+    ws.append_row([username, date, category, float(amount), txn_type, note])
 
 
 @st.cache_data(ttl=60)
-def get_transactions(month: str | None = None) -> pd.DataFrame:
-    """Fetch transactions, optionally filtered by month ('YYYY-MM')."""
+def get_transactions(month: str | None = None, username: str = "default") -> pd.DataFrame:
+    """Fetch transactions for a user, optionally filtered by month ('YYYY-MM')."""
     try:
         ws = get_or_create_worksheet("Transactions", TRANSACTION_HEADERS)
         records = ws.get_all_records()
@@ -114,62 +116,59 @@ def get_transactions(month: str | None = None) -> pd.DataFrame:
     df = pd.DataFrame(records)
     df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce").fillna(0)
 
+    # Filter by user, hide Username column from consumers
+    if "Username" in df.columns:
+        df = df[df["Username"] == username]
+        df = df.drop(columns=["Username"])
+
     if month:
         df = df[df["Date"].str.startswith(month)]
 
     return df.reset_index(drop=True)
 
 
-def get_expenses(month: str | None = None) -> pd.DataFrame:
-    """Get only Expense-type transactions."""
-    df = get_transactions(month)
-    if df.empty:
-        return df
+def get_expenses(month: str | None = None, username: str = "default") -> pd.DataFrame:
+    df = get_transactions(month, username)
+    if df.empty: return df
     return df[df["Type"] == "Expense"].reset_index(drop=True)
 
 
-def get_investments(month: str | None = None) -> pd.DataFrame:
-    """Get only Investment-type transactions."""
-    df = get_transactions(month)
-    if df.empty:
-        return df
+def get_investments(month: str | None = None, username: str = "default") -> pd.DataFrame:
+    df = get_transactions(month, username)
+    if df.empty: return df
     return df[df["Type"] == "Investment"].reset_index(drop=True)
 
 
-# ─── Budget ──────────────────────────────────────────────────────
-def set_budget(month: str, amount: float) -> None:
-    """Set or update the budget for a given month."""
-    ws = get_or_create_worksheet("Budget", BUDGET_HEADERS)
-    records = ws.get_all_records()
-
-    # Check if month already exists → update
-    for i, row in enumerate(records):
-        if row.get("Month") == month:
-            ws.update_cell(i + 2, 2, float(amount))  # +2 for header + 0-index
-            return
-
-    # Otherwise append
-    ws.append_row([month, float(amount)])
-
-
-def get_budget(month: str) -> float:
-    """Get budget for a given month. Returns 0 if not set."""
-    all_budgets = get_all_budgets()
-    return all_budgets.get(month, 0.0)
-
-
 @st.cache_data(ttl=60)
-def get_all_budgets() -> dict:
-    """Fetch ALL budget records in one API call. Returns {month: amount}."""
+def get_all_budgets(username: str = "default") -> dict:
+    """Fetch ALL budget records for a user. Returns {month: amount}."""
     ws = get_or_create_worksheet("Budget", BUDGET_HEADERS)
     records = ws.get_all_records()
     result = {}
     for row in records:
-        try:
-            result[str(row["Month"])] = float(row["Budget"])
-        except (ValueError, TypeError, KeyError):
-            pass
+        if str(row.get("Username", "default")) == username:
+            try:
+                result[str(row["Month"])] = float(row["Budget"])
+            except (ValueError, TypeError, KeyError):
+                pass
     return result
+
+
+def get_budget(month: str, username: str = "default") -> float:
+    return get_all_budgets(username).get(month, 0.0)
+
+
+def set_budget(month: str, amount: float, username: str = "default") -> None:
+    ws = get_or_create_worksheet("Budget", BUDGET_HEADERS)
+    records = ws.get_all_records()
+    usermonth = f"{username}::{month}"
+    for i, row in enumerate(records, start=2):
+        if str(row.get("Username")) == username and str(row.get("Month")) == month:
+            ws.update_cell(i, 3, float(amount))
+            get_all_budgets.clear()
+            return
+    ws.append_row([usermonth, month, float(amount), username])
+    get_all_budgets.clear()
 
 
 # ─── Config ──────────────────────────────────────────────────────
@@ -241,33 +240,62 @@ def get_transactions_with_index(month: str | None = None) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-# ─── Category Limits (stored as JSON string in Config) ───────────
+# ─── Category Limits (stored as JSON string in Config, per user) ─
 import json as _json
 
-_CAT_LIMITS_KEY = "category_limits_json"
 
-
-def get_category_limits() -> dict:
-    """Get per-category budget limits {category: amount}."""
-    raw = get_config(_CAT_LIMITS_KEY, "{}")
+def get_category_limits(username: str = "default") -> dict:
+    """Get per-category budget limits for a user {category: amount}."""
+    key = f"category_limits_json__{username}"
+    raw = get_config(key, "{}")
     try:
         return _json.loads(raw)
     except Exception:
         return {}
 
 
-def set_category_limit(category: str, amount: float) -> None:
-    """Set a budget limit for a specific category."""
-    limits = get_category_limits()
+def set_category_limit(category: str, amount: float, username: str = "default") -> None:
+    """Set a budget limit for a specific category (per user)."""
+    key = f"category_limits_json__{username}"
+    limits = get_category_limits(username)
     limits[category] = float(amount)
-    set_config(_CAT_LIMITS_KEY, _json.dumps(limits))
+    set_config(key, _json.dumps(limits))
 
 
-def remove_category_limit(category: str) -> None:
-    """Remove a category limit."""
-    limits = get_category_limits()
+def remove_category_limit(category: str, username: str = "default") -> None:
+    """Remove a category limit (per user)."""
+    key = f"category_limits_json__{username}"
+    limits = get_category_limits(username)
     limits.pop(category, None)
-    set_config(_CAT_LIMITS_KEY, _json.dumps(limits))
+    set_config(key, _json.dumps(limits))
+
+
+# ─── Users ───────────────────────────────────────────────────────
+def get_all_users() -> list:
+    """Return list of all user dicts {username, name, pin_hash}."""
+    ws = get_or_create_worksheet("Users", USERS_HEADERS)
+    records = ws.get_all_records()
+    result = []
+    for row in records:
+        if row.get("Username"):
+            result.append({
+                "username": str(row["Username"]),
+                "name": str(row.get("Name", row["Username"])),
+                "pin_hash": str(row.get("PinHash", "")),
+            })
+    return result
+
+
+def create_user(username: str, name: str, pin_hash: str) -> None:
+    """Create a new user profile in the Users sheet."""
+    ws = get_or_create_worksheet("Users", USERS_HEADERS)
+    ws.append_row([username, name, pin_hash])
+
+
+# ─── Cleanup (no-op stub for cloud mode) ─────────────────────────
+def cleanup_old_data(username: str = "default") -> int:
+    """In cloud mode, cleanup is a no-op. Returns 0."""
+    return 0
 
 
 # ─── Stub for direct data access (local-mode compat) ────────────

@@ -47,6 +47,7 @@ def _default_data() -> dict:
         "transactions": [],
         "budgets": {},
         "category_limits": {},
+        "users": [],
         "config": {
             "warning_threshold": 20,
         },
@@ -60,10 +61,12 @@ def add_transaction(
     amount: float,
     txn_type: str,
     note: str = "",
+    username: str = "default",
 ) -> None:
     """Add a transaction."""
     data = _load_data()
     data["transactions"].append({
+        "Username": username,
         "Date": date,
         "Category": category,
         "Amount": float(amount),
@@ -124,8 +127,8 @@ def get_transactions_with_index(month: str | None = None) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def get_transactions(month: str | None = None) -> pd.DataFrame:
-    """Fetch transactions, optionally filtered by month ('YYYY-MM')."""
+def get_transactions(month: str | None = None, username: str = "default") -> pd.DataFrame:
+    """Fetch transactions for a user, optionally filtered by month."""
     data = _load_data()
     txns = data.get("transactions", [])
 
@@ -135,50 +138,62 @@ def get_transactions(month: str | None = None) -> pd.DataFrame:
     df = pd.DataFrame(txns)
     df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce").fillna(0)
 
-    # Drop internal fields
+    # Filter by user
+    if "Username" in df.columns:
+        df = df[df["Username"] == username]
     if "Timestamp" in df.columns:
         df = df.drop(columns=["Timestamp"])
-
+    if "Username" in df.columns:
+        df = df.drop(columns=["Username"])
     if month:
         df = df[df["Date"].str.startswith(month)]
 
     return df.reset_index(drop=True)
 
 
-def get_expenses(month: str | None = None) -> pd.DataFrame:
-    """Get only Expense-type transactions."""
-    df = get_transactions(month)
+def get_expenses(month: str | None = None, username: str = "default") -> pd.DataFrame:
+    """Get only Expense-type transactions for a user."""
+    df = get_transactions(month, username)
     if df.empty:
         return df
     return df[df["Type"] == "Expense"].reset_index(drop=True)
 
 
-def get_investments(month: str | None = None) -> pd.DataFrame:
-    """Get only Investment-type transactions."""
-    df = get_transactions(month)
+def get_investments(month: str | None = None, username: str = "default") -> pd.DataFrame:
+    """Get only Investment-type transactions for a user."""
+    df = get_transactions(month, username)
     if df.empty:
         return df
     return df[df["Type"] == "Investment"].reset_index(drop=True)
 
 
 # ─── Budget ──────────────────────────────────────────────────
-def set_budget(month: str, amount: float) -> None:
-    """Set or update the budget for a given month."""
+def set_budget(month: str, amount: float, username: str = "default") -> None:
+    """Set or update the budget for a user+month."""
     data = _load_data()
-    data["budgets"][month] = float(amount)
+    key = f"{username}::{month}"
+    data["budgets"][key] = float(amount)
     _save_data(data)
 
 
-def get_budget(month: str) -> float:
-    """Get budget for a given month. Returns 0 if not set."""
+def get_budget(month: str, username: str = "default") -> float:
+    """Get budget for a user+month."""
     data = _load_data()
-    return float(data.get("budgets", {}).get(month, 0))
+    key = f"{username}::{month}"
+    # Try new keyed format first, fall back to old
+    return float(data.get("budgets", {}).get(key, data.get("budgets", {}).get(month, 0)))
 
 
-def get_all_budgets() -> dict:
-    """Get all budgets as {month: amount} dict. Single read, no loop needed."""
+def get_all_budgets(username: str = "default") -> dict:
+    """Get all budgets for a user as {month: amount}."""
     data = _load_data()
-    return {k: float(v) for k, v in data.get("budgets", {}).items()}
+    prefix = f"{username}::"
+    result = {}
+    for k, v in data.get("budgets", {}).items():
+        if k.startswith(prefix):
+            month = k[len(prefix):]
+            result[month] = float(v)
+    return result
 
 
 # ─── Config ──────────────────────────────────────────────────
@@ -197,24 +212,64 @@ def set_config(key: str, value: str) -> None:
     _save_data(data)
 
 
-# ─── Category Limits ─────────────────────────────────────────
-def get_category_limits() -> dict:
-    """Get per-category budget limits {category: amount}."""
+# ─── Users ───────────────────────────────────────────────────
+def get_all_users() -> list:
+    """Return list of all user dicts {username, name, pin_hash}."""
     data = _load_data()
-    return data.get("category_limits", {})
+    return data.get("users", [])
 
 
-def set_category_limit(category: str, amount: float) -> None:
-    """Set a budget limit for a specific category."""
+def create_user(username: str, name: str, pin_hash: str) -> None:
+    """Create a new user profile."""
+    data = _load_data()
+    if "users" not in data:
+        data["users"] = []
+    data["users"].append({
+        "username": username,
+        "name": name,
+        "pin_hash": pin_hash,
+    })
+    _save_data(data)
+
+
+# ─── Auto-cleanup: delete data older than 1 year ─────────────
+def cleanup_old_data(username: str = "default") -> int:
+    """Delete transactions older than 365 days for this user. Returns count deleted."""
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+    data = _load_data()
+    before = len(data["transactions"])
+    data["transactions"] = [
+        t for t in data["transactions"]
+        if t.get("Username", "default") != username or t.get("Date", "9999") >= cutoff
+    ]
+    removed = before - len(data["transactions"])
+    if removed > 0:
+        _save_data(data)
+    return removed
+
+
+# ─── Category Limits (per user) ──────────────────────────────
+def get_category_limits(username: str = "default") -> dict:
+    data = _load_data()
+    key = f"cat_limits_{username}"
+    return data.get("category_limits", {}).get(key, {})
+
+
+def set_category_limit(category: str, amount: float, username: str = "default") -> None:
     data = _load_data()
     if "category_limits" not in data:
         data["category_limits"] = {}
-    data["category_limits"][category] = float(amount)
+    key = f"cat_limits_{username}"
+    if key not in data["category_limits"]:
+        data["category_limits"][key] = {}
+    data["category_limits"][key][category] = float(amount)
     _save_data(data)
 
 
-def remove_category_limit(category: str) -> None:
-    """Remove a category limit."""
+def remove_category_limit(category: str, username: str = "default") -> None:
     data = _load_data()
-    data.get("category_limits", {}).pop(category, None)
+    key = f"cat_limits_{username}"
+    data.get("category_limits", {}).get(key, {}).pop(category, None)
     _save_data(data)
+
