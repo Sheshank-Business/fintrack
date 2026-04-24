@@ -553,14 +553,21 @@ with tab_history:
 with tab_analytics:
     st.markdown("### 📈 Analytics")
 
-    # 6-month overview
-    st.markdown("#### 📅 6-Month Spending Overview")
+    # Fetch ALL data in ONE call each — avoid rate limits
+    all_txns_bulk   = db.get_transactions(None)  # all months, 1 API call
+    all_budgets_bulk = db.get_all_budgets()       # all budgets, 1 API call
+
     months_6 = get_month_options(6)
     monthly_data = []
     for m in months_6:
-        m_exp = db.get_expenses(m)
-        m_inv = db.get_investments(m)
-        m_bud = db.get_budget(m)
+        if not all_txns_bulk.empty and "Date" in all_txns_bulk.columns:
+            m_df = all_txns_bulk[all_txns_bulk["Date"].str.startswith(m)]
+            m_exp = m_df[m_df["Type"] == "Expense"]
+            m_inv = m_df[m_df["Type"] == "Investment"]
+        else:
+            m_exp = pd.DataFrame()
+            m_inv = pd.DataFrame()
+        m_bud = float(all_budgets_bulk.get(m, 0))
         monthly_data.append({
             "Month": get_month_label(m),
             "Spent": total_spent(m_exp),

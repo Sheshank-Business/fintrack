@@ -87,6 +87,7 @@ def add_transaction(
     ws.append_row([date, category, float(amount), txn_type, note])
 
 
+@st.cache_data(ttl=60)
 def get_transactions(month: str | None = None) -> pd.DataFrame:
     """Fetch transactions, optionally filtered by month ('YYYY-MM')."""
     try:
@@ -153,16 +154,22 @@ def set_budget(month: str, amount: float) -> None:
 
 def get_budget(month: str) -> float:
     """Get budget for a given month. Returns 0 if not set."""
+    all_budgets = get_all_budgets()
+    return all_budgets.get(month, 0.0)
+
+
+@st.cache_data(ttl=60)
+def get_all_budgets() -> dict:
+    """Fetch ALL budget records in one API call. Returns {month: amount}."""
     ws = get_or_create_worksheet("Budget", BUDGET_HEADERS)
     records = ws.get_all_records()
-
+    result = {}
     for row in records:
-        if row.get("Month") == month:
-            try:
-                return float(row["Budget"])
-            except (ValueError, TypeError):
-                return 0.0
-    return 0.0
+        try:
+            result[str(row["Month"])] = float(row["Budget"])
+        except (ValueError, TypeError, KeyError):
+            pass
+    return result
 
 
 # ─── Config ──────────────────────────────────────────────────────

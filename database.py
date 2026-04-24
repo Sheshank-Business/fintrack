@@ -175,6 +175,12 @@ def get_budget(month: str) -> float:
     return float(data.get("budgets", {}).get(month, 0))
 
 
+def get_all_budgets() -> dict:
+    """Get all budgets as {month: amount} dict. Single read, no loop needed."""
+    data = _load_data()
+    return {k: float(v) for k, v in data.get("budgets", {}).items()}
+
+
 # ─── Config ──────────────────────────────────────────────────
 def get_config(key: str, default: str = "") -> str:
     """Read a config value by key."""
