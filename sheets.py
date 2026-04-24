@@ -33,10 +33,31 @@ def get_client() -> gspread.Client:
 
 
 def get_spreadsheet() -> gspread.Spreadsheet:
-    """Get the main spreadsheet."""
+    """Get the main spreadsheet with friendly error handling."""
     client = get_client()
     sheet_id = st.secrets["sheets"]["spreadsheet_id"]
-    return client.open_by_key(sheet_id)
+    try:
+        return client.open_by_key(sheet_id)
+    except gspread.exceptions.APIError:
+        st.error(
+            "### 🔑 Google Sheet Access Denied\n\n"
+            "The app cannot open your Google Sheet. **You need to share it** with the service account.\n\n"
+            "**Do this now:**\n"
+            "1. Open your Google Sheet\n"
+            "2. Click **Share** (top right)\n"
+            "3. Add this email as **Editor**:\n\n"
+            "```\nfinance-os@nexgen-fintrack.iam.gserviceaccount.com\n```\n\n"
+            "4. Uncheck 'Notify people' → Click **Share**\n\n"
+            "Then refresh this page."
+        )
+        st.stop()
+    except Exception as e:
+        st.error(
+            f"### ❌ Cannot open Google Sheet\n\n"
+            f"Check that your Sheet ID in secrets is correct.\n\n"
+            f"Error: `{type(e).__name__}`"
+        )
+        st.stop()
 
 
 def get_or_create_worksheet(
@@ -50,6 +71,7 @@ def get_or_create_worksheet(
         ws = spreadsheet.add_worksheet(title=name, rows=1000, cols=len(headers))
         ws.append_row(headers)
     return ws
+
 
 
 # ─── Transactions ────────────────────────────────────────────────
