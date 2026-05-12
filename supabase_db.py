@@ -1,7 +1,7 @@
 """
 supabase_db.py - Supabase-backed data layer for Fintrack
 
-Implements the same function contract as database.py/sheets.py so app.py
+Implements the same function contract as database.py so app.py
 can switch backends without changing business logic.
 """
 
@@ -29,8 +29,10 @@ def _month_bounds(month: str) -> tuple[str, str]:
     return (f"{month}-01", f"{month}-{last_day:02d}")
 
 
-def _empty_txn_df(with_index: bool = False) -> pd.DataFrame:
-    cols = ["Date", "Category", "Amount", "Type", "Note"]
+def _empty_txn_df(with_index: bool = False, admin: bool = False) -> pd.DataFrame:
+    cols = ["Date", "Category", "Amount", "Type", "Payment", "Note"]
+    if admin:
+        cols = ["User"] + cols
     if with_index:
         cols = ["_idx"] + cols
     return pd.DataFrame(columns=cols)
@@ -43,6 +45,10 @@ def _safe_table_select(table: str, query_fn):
         return None
 
 
+# ═══════════════════════════════════════════════════════════════
+# TRANSACTIONS
+# ═══════════════════════════════════════════════════════════════
+
 def add_transaction(
     date: str,
     category: str,
@@ -50,6 +56,7 @@ def add_transaction(
     txn_type: str,
     note: str = "",
     username: str = "default",
+    payment_method: str = "Cash",
 ) -> None:
     db = get_client()
     db.table("transactions").insert(
@@ -59,81 +66,68 @@ def add_transaction(
             "type": str(txn_type),
             "category": str(category),
             "amount": float(amount),
+            "payment_method": str(payment_method or "Cash"),
             "note": str(note or ""),
         }
     ).execute()
 
 
-def get_transactions(month: str | None = None, username: str = "default", is_admin: bool = False) -> pd.DataFrame:
-    db = get_client()
-
-    query = db.table("transactions").select("id,date,category,amount,type,note,user_id")
-    if not is_admin:
-        query = query.eq("user_id", username)
-    if month:
-        start, end = _month_bounds(month)
-        query = query.gte("date", start).lte("date", end)
-
-    res = _safe_table_select("transactions", lambda: query.order("date", desc=False))
-    rows = (res.data if res and res.data else [])
+def _rows_to_df(rows: list, with_index: bool = False, is_admin: bool = False) -> pd.DataFrame:
     if not rows:
-        cols = ["Date", "Category", "Amount", "Type", "Note"]
-        if is_admin:
-            cols = ["User", "Date", "Category", "Amount", "Type", "Note"]
-        return pd.DataFrame(columns=cols)
-
+        return _empty_txn_df(with_index=with_index, admin=is_admin)
     out = pd.DataFrame(rows)
-    rename_dict = {
+    rename = {
+        "id": "_idx",
         "date": "Date",
         "category": "Category",
         "amount": "Amount",
         "type": "Type",
+        "payment_method": "Payment",
         "note": "Note",
         "user_id": "User",
     }
-    out = out.rename(columns=rename_dict)
+    out = out.rename(columns=rename)
     out["Amount"] = pd.to_numeric(out.get("Amount", 0), errors="coerce").fillna(0)
-    for col in ["Date", "Category", "Type", "Note"]:
+    for col in ["Date", "Category", "Type", "Payment", "Note"]:
         if col not in out.columns:
             out[col] = ""
-    
+    out["Payment"] = out["Payment"].fillna("Cash")
+
+    base_cols = ["Date", "Category", "Amount", "Type", "Payment", "Note"]
     if is_admin:
-        return out[["User", "Date", "Category", "Amount", "Type", "Note"]].reset_index(drop=True)
-    return out[["Date", "Category", "Amount", "Type", "Note"]].reset_index(drop=True)
+        base_cols = ["User"] + base_cols
+    if with_index:
+        base_cols = ["_idx"] + base_cols
+    return out[[c for c in base_cols if c in out.columns]].reset_index(drop=True)
 
 
-def get_transactions_with_index(month: str | None = None, username: str = "default", is_admin: bool = False) -> pd.DataFrame:
+def get_transactions(month: str | None = None, username: str = "default", is_admin: bool = False) -> pd.DataFrame:
     db = get_client()
-
-    query = db.table("transactions").select("id,date,category,amount,type,note,user_id")
+    query = db.table("transactions").select("id,date,category,amount,type,payment_method,note,user_id")
     if not is_admin:
         query = query.eq("user_id", username)
     if month:
         start, end = _month_bounds(month)
         query = query.gte("date", start).lte("date", end)
-
     res = _safe_table_select("transactions", lambda: query.order("date", desc=False))
-    rows = (res.data if res and res.data else [])
-    if not rows:
-        cols = ["_idx", "Date", "Category", "Amount", "Type", "Note"]
-        if is_admin:
-            cols = ["_idx", "User", "Date", "Category", "Amount", "Type", "Note"]
-        return pd.DataFrame(columns=cols)
+    rows = res.data if res and res.data else []
+    return _rows_to_df(rows, with_index=False, is_admin=is_admin)
 
-    out = pd.DataFrame(rows)
-    out = out.rename(
-        columns={
-            "id": "_idx",
-            "date": "Date",
-            "category": "Category",
-            "amount": "Amount",
-            "type": "Type",
-            "note": "Note",
-            "user_id": "User",
-        }
-    )
-    out["Amount"] = pd.to_numeric(out.get("Amount", 0), errors="coerce").fillna(0)
-    for col in ["Date", "Category", "Type", "Note"]:, is_admin: bool = False) -> pd.DataFrame:
+
+def get_transactions_with_index(month: str | None = None, username: str = "default", is_admin: bool = False) -> pd.DataFrame:
+    db = get_client()
+    query = db.table("transactions").select("id,date,category,amount,type,payment_method,note,user_id")
+    if not is_admin:
+        query = query.eq("user_id", username)
+    if month:
+        start, end = _month_bounds(month)
+        query = query.gte("date", start).lte("date", end)
+    res = _safe_table_select("transactions", lambda: query.order("date", desc=False))
+    rows = res.data if res and res.data else []
+    return _rows_to_df(rows, with_index=True, is_admin=is_admin)
+
+
+def get_expenses(month: str | None = None, username: str = "default", is_admin: bool = False) -> pd.DataFrame:
     df = get_transactions(month, username, is_admin)
     if df.empty:
         return df
@@ -141,16 +135,7 @@ def get_transactions_with_index(month: str | None = None, username: str = "defau
 
 
 def get_investments(month: str | None = None, username: str = "default", is_admin: bool = False) -> pd.DataFrame:
-    df = get_transactions(month, username, is_admin
-def get_expenses(month: str | None = None, username: str = "default") -> pd.DataFrame:
-    df = get_transactions(month, username)
-    if df.empty:
-        return df
-    return df[df["Type"].str.lower() == "expense"].reset_index(drop=True)
-
-
-def get_investments(month: str | None = None, username: str = "default") -> pd.DataFrame:
-    df = get_transactions(month, username)
+    df = get_transactions(month, username, is_admin)
     if df.empty:
         return df
     return df[df["Type"].str.lower() == "investment"].reset_index(drop=True)
@@ -183,6 +168,7 @@ def update_transaction(
     txn_type: str,
     note: str = "",
     username: str = "default",
+    payment_method: str = "Cash",
 ) -> bool:
     db = get_client()
     try:
@@ -202,6 +188,7 @@ def update_transaction(
                 "category": str(category),
                 "amount": float(amount),
                 "type": str(txn_type),
+                "payment_method": str(payment_method or "Cash"),
                 "note": str(note or ""),
             }
         ).eq("id", str(index)).eq("user_id", username).execute()
@@ -210,14 +197,14 @@ def update_transaction(
         return False
 
 
+# ═══════════════════════════════════════════════════════════════
+# BUDGETS
+# ═══════════════════════════════════════════════════════════════
+
 def set_budget(month: str, amount: float, username: str = "default") -> None:
     db = get_client()
     db.table("budgets").upsert(
-        {
-            "user_id": username,
-            "month": month,
-            "amount": float(amount),
-        },
+        {"user_id": username, "month": month, "amount": float(amount)},
         on_conflict="user_id,month",
     ).execute()
 
@@ -254,6 +241,10 @@ def get_all_budgets(username: str = "default") -> dict:
     return out
 
 
+# ═══════════════════════════════════════════════════════════════
+# CONFIG
+# ═══════════════════════════════════════════════════════════════
+
 def get_config(key: str, default: str = "") -> str:
     db = get_client()
     try:
@@ -270,9 +261,12 @@ def set_config(key: str, value: str) -> None:
     try:
         db.table("configs").upsert({"key": key, "value": str(value)}, on_conflict="key").execute()
     except Exception:
-        # Graceful no-op when optional table is not configured yet.
         return
 
+
+# ═══════════════════════════════════════════════════════════════
+# CATEGORY LIMITS
+# ═══════════════════════════════════════════════════════════════
 
 def get_category_limits(username: str = "default") -> dict:
     db = get_client()
@@ -295,11 +289,7 @@ def set_category_limit(category: str, amount: float, username: str = "default") 
     db = get_client()
     try:
         db.table("category_limits").upsert(
-            {
-                "user_id": username,
-                "category": str(category),
-                "amount": float(amount),
-            },
+            {"user_id": username, "category": str(category), "amount": float(amount)},
             on_conflict="user_id,category",
         ).execute()
     except Exception:
@@ -313,6 +303,10 @@ def remove_category_limit(category: str, username: str = "default") -> None:
     except Exception:
         return
 
+
+# ═══════════════════════════════════════════════════════════════
+# MAINTENANCE
+# ═══════════════════════════════════════════════════════════════
 
 def cleanup_old_data(username: str = "default") -> int:
     cutoff = (date.today() - timedelta(days=365)).isoformat()
@@ -331,11 +325,10 @@ def cleanup_old_data(username: str = "default") -> int:
 
 
 # ═══════════════════════════════════════════════════════════════
-# ADMIN FUNCTIONS — View all family members' data
+# ADMIN FUNCTIONS
 # ═══════════════════════════════════════════════════════════════
 
 def get_all_users_list() -> list[str]:
-    """Get list of all unique user_ids in the system."""
     db = get_client()
     try:
         res = db.table("transactions").select("user_id").execute()
@@ -346,13 +339,10 @@ def get_all_users_list() -> list[str]:
 
 
 def get_all_transactions_admin(month: str | None = None) -> pd.DataFrame:
-    """Get ALL transactions across all users (admin view)."""
-    df = get_transactions(month=month, username="default", is_admin=True)
-    return df
+    return get_transactions(month=month, username="default", is_admin=True)
 
 
 def get_all_budgets_admin() -> dict:
-    """Get all budgets for all users. Returns {user: {month: amount}}."""
     db = get_client()
     out: dict[str, dict[str, float]] = {}
     try:
@@ -371,26 +361,18 @@ def get_all_budgets_admin() -> dict:
 
 
 def get_user_total_spent(username: str) -> float:
-    """Total amount spent (all expenses) by a user."""
     df = get_expenses(username=username)
-    if df.empty:
-        return 0.0
-    return float(df["Amount"].sum())
+    return float(df["Amount"].sum()) if not df.empty else 0.0
 
 
 def get_user_total_invested(username: str) -> float:
-    """Total amount invested (all investments) by a user."""
     df = get_investments(username=username)
-    if df.empty:
-        return 0.0
-    return float(df["Amount"].sum())
+    return float(df["Amount"].sum()) if not df.empty else 0.0
 
 
 def get_all_users_summary() -> pd.DataFrame:
-    """Get all users' summary - admin view."""
     users = get_all_users_list()
     current_month = date.today().strftime("%Y-%m")
-    
     rows = []
     for user in users:
         spent = get_user_total_spent(user)
@@ -402,10 +384,8 @@ def get_all_users_summary() -> pd.DataFrame:
             "Total Invested": float(invested),
             f"Budget ({current_month})": float(budget),
         })
-    
     if not rows:
         return pd.DataFrame()
-    
     df = pd.DataFrame(rows)
     for col in ["Total Spent", "Total Invested", f"Budget ({current_month})"]:
         if col in df.columns:
@@ -413,16 +393,17 @@ def get_all_users_summary() -> pd.DataFrame:
     return df
 
 
+# ═══════════════════════════════════════════════════════════════
+# LEGACY STUBS
+# ═══════════════════════════════════════════════════════════════
+
 def get_all_users() -> list:
-    # No profile table needed when using Google OAuth.
     return []
 
 
 def create_user(username: str, name: str, pin_hash: str) -> None:
-    # No-op for compatibility with legacy auth module.
     return
 
 
 def _load_data() -> dict:
-    # Compatibility stub used by older app paths.
     return {"transactions": [], "budgets": {}, "category_limits": {}, "config": {}}

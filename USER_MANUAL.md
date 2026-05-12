@@ -1,256 +1,427 @@
-# Fintrack User Manual (Supabase + Flexible Sign-In)
+﻿# 📘 Nexgen Fintrack — User Manual
 
-This manual explains exactly how you and other users can use Fintrack from any device (phone, laptop, tablet) with secure, separate data.
+**Made by Sheshank with ❤️**
 
-## 1. What You Get
+---
 
-- One shared app URL, usable from any browser.
-- Flexible sign-in: Google OAuth or family login (name + passcode / name-only).
-- Each user sees only their own transactions and budgets.
-- Same account can be used on phone and laptop simultaneously.
+## Table of Contents
 
-## 2. How Login Works (Important)
+1. [Getting Started](#1-getting-started)
+2. [The 7 Tabs Explained](#2-the-7-tabs-explained)
+3. [Daily Workflow](#3-daily-workflow)
+4. [Advanced Features](#4-advanced-features)
+5. [Admin Features (Family Mode)](#5-admin-features-family-mode)
+6. [Tips & Tricks](#6-tips--tricks)
+7. [FAQs](#7-faqs)
 
-- First time on a device: user logs in once using the selected auth mode.
-- After login: user stays logged in on that device/browser.
-- User does not need to log in every time.
-- Explicit logout is required to end session on that device.
+---
 
-## 3. Choose Auth Mode
+## 1. Getting Started
 
-You can use one of these modes in secrets:
+### Login
 
-- passcode: each person enters name + shared family passcode
-- name_only: each person enters only name
-- google: Google OAuth sign-in
+**Passcode Mode (Family):**
+1. Enter your name (e.g., "Shanky")
+2. Enter family passcode: **1234**
+3. Click "Continue"
 
-Example:
+**Google OAuth Mode:**
+1. Click "Sign in with Google"
+2. Select your Google account
+3. Grant access
 
-```toml
-[app_auth]
-mode = "passcode"   # or "name_only" or "google"
-shared_passcode = "1234"
-admin_user = "Shanky"   # Optional: set who can see all family data
-```
+### Your First Transaction
 
-If using passcode or name_only, Google OAuth setup is not required.
+1. Open the **➕ Add** tab (default)
+2. Select "💸 Expense"
+3. Choose category (e.g., "🍔 Food")
+4. Enter amount: 250
+5. Choose payment method: "💵 Cash"
+6. Add note (optional): "Lunch at café"
+7. Click "💸 Add Expense"
+8. ✅ Toast notification confirms!
 
-## 4. One-Time Owner Setup
+---
 
-### Step 1: Create Supabase project
+## 2. The 7 Tabs Explained
 
-1. Go to https://supabase.com.
-2. Create a new project (example: fintrack).
-3. Open Settings -> API.
-4. Copy:
-- Project URL
-- anon public key
+### Tab 1: ➕ Add (Your Daily Companion)
 
-### Step 2: Create database tables
+**What:** Log expenses and investments instantly.
 
-Run this SQL in Supabase SQL Editor:
+**How to use:**
+1. Choose type: **💸 Expense** or **📈 Investment**
+2. Pick category from dropdown
+3. Enter amount in rupees
+4. (Expense only) Select payment method
+5. Add optional note
+6. Click date expander if not today
+7. Submit
 
-```sql
-create extension if not exists pgcrypto;
+**What you see after:**
+- Today's transactions list
+- Last 7 days summary
+- Quick stats in sidebar
 
-create table if not exists transactions (
-  id uuid default gen_random_uuid() primary key,
-  user_id text not null,
-  date date not null,
-  type text not null,
-  category text not null,
-  amount numeric not null,
-  note text default '',
-  created_at timestamp default now()
-);
+---
 
-create table if not exists budgets (
-  id uuid default gen_random_uuid() primary key,
-  user_id text not null,
-  month text not null,
-  amount numeric not null,
-  unique(user_id, month)
-);
+### Tab 2: 📊 Overview (Month at a Glance)
 
-create table if not exists category_limits (
-  id uuid default gen_random_uuid() primary key,
-  user_id text not null,
-  category text not null,
-  amount numeric not null,
-  unique(user_id, category)
-);
+**What:** Current month dashboard with metrics and charts.
 
-create table if not exists configs (
-  id uuid default gen_random_uuid() primary key,
-  key text not null unique,
-  value text not null default ''
-);
-```
+**Key elements:**
+- **Alert banner:** Red (overspent) / Yellow (low) / Green (healthy)
+- **4 metric cards:** Budget | Spent | Remaining | Invested
+- **Budget bar:** Visual progress (color changes at 80% / 100%)
+- **Pie chart:** Where your money goes (by category)
+- **Line chart:** Daily spending trend
+- **Category limits:** Individual category progress bars
+- **Top categories:** Bar chart of biggest spending categories
+- **Payment breakdown:** How you paid (Cash/Card/UPI/etc)
 
-### Step 3: Configure Streamlit secrets
+**How to read:**
+- Budget bar at 50% green = spending OK
+- Budget bar at 90% yellow = warning, be careful
+- Budget bar over 100% red = you've overspent
 
-Use the template in [.streamlit/secrets.toml.example](.streamlit/secrets.toml.example).
+---
 
-For local dev, set these in your [.streamlit/secrets.toml](.streamlit/secrets.toml).
-For Streamlit Cloud, paste the same keys in App Settings -> Secrets.
+### Tab 3: 📈 Analytics (Understand Patterns)
 
-Minimum required sections (passcode mode):
+**What:** Trends, insights, and spending analysis.
 
-```toml
-[supabase]
-url = "https://YOUR_PROJECT_REF.supabase.co"
-key = "YOUR_SUPABASE_ANON_KEY"
+**Sections:**
+1. **12-Month Trend**
+   - Bar chart showing spent, invested, and budget for last 12 months
+   - Spot patterns: "I spend more in monsoon season"
 
-[app_auth]
-mode = "passcode"
-shared_passcode = "1234"
-```
+2. **Savings Rate**
+   - Cards showing monthly savings % (Budget - Spent) / Budget
+   - Green = 30%+ saved | Yellow = 10-30% | Red = <10% saved
 
-For Google OAuth mode only:
+3. **Category Breakdown**
+   - Select any month
+   - See expense breakdown % by category
+   - See investment breakdown
 
-```toml
-[auth]
-redirect_uri = "https://YOUR-APP-NAME.streamlit.app/oauth2callback"
+4. **Month-on-Month Change**
+   - Table showing "Food: ₹15K last month → ₹18K this month (+20%)"
+   - Quick way to spot increases/decreases
 
-[google_oauth]
-client_id = "YOUR_GOOGLE_CLIENT_ID"
-client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
-```
+5. **Smart Insights** (Auto-generated)
+   - "🚨 You've overspent by ₹2,000 this month"
+   - "🏆 Food is your top expense — ₹18,000 (45% of spend)"
+   - "📈 Spending up by ₹5,000 vs last month (+25%)"
+   - "🟡 Entertainment near limit: ₹4,800 / ₹5,000"
 
-### Step 4: Deploy app
+---
 
-1. Push code to GitHub.
-2. Create app on Streamlit Community Cloud.
-3. Set secrets in Streamlit Cloud.
-4. Open app URL and test login.
+### Tab 4: 📜 History (Manage Past)
 
-## 5. Daily Usage (Owner)
+**What:** View, edit, and delete transactions.
 
-1. Open your Streamlit app URL.
-2. Sign in once with selected mode.
-3. Set monthly budget.
-4. Add expenses/investments.
-5. View dashboard, history, analytics.
-6. Optional: set category limits and alert threshold.
+**How to use:**
+1. Select **month** (dropdown)
+2. Filter by **type** (All / Expense / Investment)
+3. Click **"⬇️ Export CSV"** to download spreadsheet
+4. See summary stats (total expenses, investments, count)
 
-## 6. Daily Usage (Other Users)
+**Each transaction row:**
+- 💸 Category, Date, Payment method, Note
+- Amount (in rupees)
+- ✏️ Edit button
+- 🗑️ Delete button (confirm to remove)
 
-Any friend/team member can use the same app URL:
+**Edit a transaction:**
+1. Click ✏️ on any row
+2. Edit modal appears
+3. Change any field (date, category, amount, payment, note)
+4. Click "💾 Save"
 
-1. Open the app URL.
-2. Log in with selected mode:
-  - passcode: their name + family passcode
-  - name_only: their name only
-  - google: their Google account
-3. Use app normally.
+**Delete a transaction:**
+1. Click 🗑️
+2. Confirm button appears
+3. Click ✅ to confirm delete
 
-Data isolation behavior:
+---
 
-- Your rows are tagged with your email as user_id (Google) or your name (passcode/name_only).
-- Their rows are tagged with their email/name as user_id.
-- Queries are always filtered by current logged-in user.
-- They cannot see your records in app views.
+### Tab 5: 💰 Budget
 
-**Note:** If an admin is configured, the admin user sees all family data in the "👑 Admin" tab.
+**Inner Tab: 💸 Expense Budget**
+
+*Set monthly spending limit:*
+1. Last 3 months summary (non-editable)
+2. Choose month from dropdown
+3. Enter budget amount (e.g., 25000)
+4. Click "💾 Save Budget"
 
-## 6.5. Admin Features (Optional)
+*Set category spending limits:*
+1. Select category (e.g., "🍔 Food")
+2. Enter limit (e.g., 5000)
+3. Click "➕ Set"
+4. See progress bars on Overview tab
 
-If your family wants one person to oversee all spending:
+**Inner Tab: 📈 Investment Budget**
 
-1. Set `admin_user` in secrets (must match their login name):
+*Set per-category investment targets:*
+1. Select investment category (e.g., "🪙 Nifty 50")
+2. Enter monthly target (e.g., 10000)
+3. Click "➕ Set"
+4. See progress vs actual this month
 
-```toml
-[app_auth]
-mode = "passcode"
-shared_passcode = "1234"
-admin_user = "Shanky"
-```
+*Track progress:*
+- Green bar = on track (≥100% of target)
+- Yellow bar = halfway to target
+- Red bar = behind target
+- Updates automatically as you log investments
 
-2. When "Shanky" logs in, they see:
-   - **👑 Admin tab** with family summary
-   - Individual member data (expenses, investments, budgets)
-   - All transactions across all family members
-   - Monthly spending trends for each member
+---
 
-3. Other family members see no admin features—their normal tabs remain unchanged.
+### Tab 6: 👑 Admin (Shanky Only)
 
-4. Non-admin members cannot see each other's data, only their own.
+**What:** Family financial overview (if you're the admin).
 
-## 7. Multi-Device Behavior
+**Appears only if:** You're logged in as "Shanky" (admin_user from secrets)
 
-### Same user on phone + laptop
+**Sections:**
 
-- Sign in once on phone, once on laptop.
-- Both sessions remain logged in.
-- Data syncs through Supabase instantly.
-- Add expense on phone -> visible on laptop after refresh/rerun.
+1. **Family Summary Table**
+   - List of all family members
+   - Their spent, invested, budget, remaining for current month
 
-### Different users on different devices
+2. **Member Detail View**
+   - Select a family member
+   - Pick a month
+   - See their expenses (left) and investments (right)
+   - Shows their budget vs actual spent
 
-- Each logs in with own Google account.
-- Each sees only personal data.
+3. **All Transactions**
+   - Month selector (or "All Time")
+   - Table of EVERY family member's transactions
+   - Includes name column so you see who spent what
 
-## 8. Running Locally
+---
 
-From project root:
+### Tab 7: ⚙️ Settings (Customize)
+
+**My Categories**
+- Add custom expense categories (e.g., "🎮 Gaming")
+- Add custom investment categories (e.g., "🪧 Angel Investing")
+- Delete custom categories (default categories locked)
+- Reset to defaults (removes all custom, back to originals)
 
-```powershell
-pip install -r requirements.txt
-streamlit run app.py
-```
+**Alerts**
+- Slider: "Warn when budget remaining falls below ___%"
+- Default: 20%
+- Example: Budget = ₹25,000, Alert = 20% → Warning at ₹5,000 remaining
+- Change and save
 
-Modes:
+**App Info**
+- Mode: "☁️ Cloud (Supabase)" or "💾 Local (JSON)"
+- Your username
+- Total transactions logged
+- Number of categories
+- **"Made by Sheshank with ❤️"**
 
-- If [supabase] secrets exist -> cloud mode (Supabase + selected sign-in mode).
-- If missing -> local JSON fallback mode.
+---
 
-## 9. Logout and Session Control
+## 3. Daily Workflow
 
-- Use Logout button in sidebar to sign out of the app session.
-- Sign-out is device/browser specific.
-- Signing out on phone does not sign out laptop automatically.
+### Morning Routine
+1. Open app
+2. Check **Overview** tab → see remaining budget
+3. Plan day based on remaining
 
-## 10. Common Troubleshooting
+### During Day
+1. Make purchase
+2. Open **➕ Add** tab
+3. Log expense (2 seconds)
+4. See today's transactions update
 
-### App keeps using local mode
+### Evening
+1. Check **Overview** → see daily total
+2. Check **Overview** → pie chart shows category breakdown
+3. Plan tomorrow based on pace
 
-- Check [supabase] section in secrets.
-- Ensure url and key are present and valid.
+### Weekly Review
+1. Open **📈 Analytics** tab
+2. Check savings rate
+3. Review top categories
+4. Adjust budget if needed
 
-### Login screen not working
+### Monthly
+1. Set next month's budget in 💰 **Budget** tab
+2. Check **Analytics** for month-on-month changes
+3. Archive old month (optional: export CSV from 📜 **History**)
 
-- If mode = passcode, ensure [app_auth].shared_passcode exists.
-- If mode = google, validate [auth] redirect_uri matches deployed app URL.
-- If mode = google, check [google_oauth] client_id/client_secret are correct.
+---
 
-### Data not saving
+## 4. Advanced Features
 
-- Verify tables exist in Supabase.
-- Confirm anon key is correct.
-- Check Supabase project is active (not paused).
+### Payment Method Tracking
 
-### User cannot see expected data
+Every expense records HOW you paid:
+- 💵 **Cash** — physical money handed over
+- 💳 **Credit Card** — card payment (pay later)
+- 📱 **UPI** — instant digital transfer
+- 🏦 **Net Banking** — bank transfer
 
-- Ensure they are logged in with intended Google account.
-- Data is separated by email; switching account changes dataset.
+**Why track?**
+- See payment method breakdown pie on Overview
+- Useful for reconciling with bank/card statements
+- Understand payment behavior
 
-## 11. Security Notes
+### Category Limits
 
-- Never commit real secrets to git.
-- Keep anon key (and OAuth secret if used) in Streamlit secrets only.
-- user_id is based on login identity:
-  - google mode: email
-  - passcode/name_only mode: normalized name
-- **Admin user:** Only set `admin_user` if you trust that person to see all family data. The admin cannot modify other users' data, only view it.
-- **Shared passcode:** All family members with the same passcode are equally trusted—anyone can see any other member's data if they manually edit the secrets file. This is by design for family use.
+Set spending caps per category:
+1. Go to **💰 Budget** → **💸 Expense Budget**
+2. Scroll to "Category Spending Limits"
+3. Pick category, set limit (e.g., "Food: ₹5,000/month")
+4. See progress bar on Overview
+5. Get warning if exceeded
 
-## 12. Quick Share Instructions (for new users)
+### Investment Targets
 
-Send this to any user:
+Set monthly investment goals:
+1. Go to **💰 Budget** → **📈 Investment Budget**
+2. Add target (e.g., "Nifty 50: ₹10,000/month")
+3. See progress vs actual below
+4. Track if on track (green), halfway (yellow), or behind (red)
 
-1. Open this link: YOUR_APP_URL
-2. Log in with the method shown on screen.
-3. Start using Fintrack.
-4. Your data is private to your account.
+### Export & Backup
 
-That is it.
+Export any month's data:
+1. Go to **📜 History**
+2. Select month
+3. Click "⬇️ Export CSV"
+4. File downloads (open in Excel)
+
+### Custom Categories
+
+Add personal categories:
+1. Go to **⚙️ Settings** → **My Categories**
+2. Type new category (e.g., "🎮 Gaming" or "🪧 Angel Investing")
+3. Click "➕ Add"
+4. Use in transactions
+
+---
+
+## 5. Admin Features (Family Mode)
+
+### View All Family Data (If You're Admin)
+
+**Prerequisites:**
+- You're logged in as the admin user (e.g., "Shanky")
+- App auth mode is "passcode"
+
+**What you can see:**
+- All family members' expenses
+- All family members' investments
+- Their budgets vs actual
+- Entire transaction history
+
+**Use cases:**
+- Monitor if family is within budget
+- See who spent most this month
+- Identify spending patterns
+- Ensure financial responsibility
+
+### Access Admin Tab
+
+1. Log in as admin (Shanky + passcode 1234)
+2. An extra tab appears: **👑 Admin**
+3. See family summary table
+4. Click on member name → view their detail
+5. See their expenses, investments, budget
+
+---
+
+## 6. Tips & Tricks
+
+**💡 Log Expenses Immediately**
+- Don't wait until evening — log instantly
+- You'll remember payment method better
+- Keeps running total accurate
+
+**💡 Use Notes**
+- "Lunch with client" vs just "Food"
+- Notes help you analyze later
+- Searchable in History tab
+
+**💡 Set Realistic Budgets**
+- Start with last month's average
+- Adjust up/down based on income
+- Revisit monthly
+
+**💡 Review Weekly, Not Daily**
+- Daily checking = obsessive
+- Weekly review = healthy habit
+- See patterns better
+
+**💡 Use Category Limits for Problem Categories**
+- If you overspend on dining, set limit
+- Helps you stay accountable
+- Visual progress bar is motivating
+
+**💡 Investment Targets ≠ Savings**
+- Savings = Budget - Spent
+- Investment targets = specific categories you want to grow
+- Set both for complete financial picture
+
+---
+
+## 7. FAQs
+
+### Q: I forgot my passcode. How do I change it?
+**A:** Change in secrets.toml (local dev) or Streamlit Cloud dashboard (production). Reload app.
+
+### Q: Can I edit someone else's transactions?
+**A:** No. Non-admin users see only their own data. Admin can see all but can't edit (by design).
+
+### Q: What if I'm offline?
+**A:** 
+- **Cloud mode:** No access (needs internet)
+- **Local mode:** Works offline, syncs when online again
+
+### Q: Can I have recurring expenses?
+**A:** Not yet. V4 planned feature. For now, log each one.
+
+### Q: Where is my data stored?
+**A:** 
+- **Cloud mode:** Supabase PostgreSQL (Google Cloud, US)
+- **Local mode:** data/finance_data.json on your computer
+
+### Q: Can I delete my account?
+**A:** 
+- Contact admin to delete all family data
+- Or export CSV and manage locally
+
+### Q: Why two payment methods for same category?
+**A:** Build profile of spending behavior. E.g., "I spend more on Credit Card for rewards, less Cash for discipline."
+
+### Q: Can I add multiple users?
+**A:** Yes, in passcode mode. Each enters their name + shared passcode. Admin sees all.
+
+### Q: Is my data secure?
+**A:**
+- All data encrypted in transit (HTTPS)
+- Supabase has backups
+- No third-party access to your data
+- Service account key never shared
+
+### Q: Can I download all my data?
+**A:** Yes. Export CSV from History tab for each month. Or access Supabase directly.
+
+---
+
+## Support
+
+**Questions?** See DOCS.md for technical details.
+
+**Bug?** Contact: Sheshank
+
+---
+
+**Made by Sheshank with ❤️**
+
+Nexgen Fintrack — Your personal finance OS.

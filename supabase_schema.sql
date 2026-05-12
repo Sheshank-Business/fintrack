@@ -10,9 +10,13 @@ create table if not exists transactions (
   type text not null,
   category text not null,
   amount numeric not null,
+  payment_method text default 'Cash',
   note text default '',
   created_at timestamp default now()
 );
+
+-- If upgrading an existing table, run this:
+-- alter table transactions add column if not exists payment_method text default 'Cash';
 
 create table if not exists budgets (
   id uuid default gen_random_uuid() primary key,
