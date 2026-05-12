@@ -239,6 +239,7 @@ st.markdown(
 tab_names = ["➕ Add", "📊 Overview", "📈 Analytics", "📜 History", "💰 Budget"]
 if IS_ADMIN:
     tab_names.append("👑 Admin")
+tab_names.append("📥 Reports")
 tab_names.append("⚙️ Settings")
 
 tabs = st.tabs(tab_names)
@@ -249,9 +250,11 @@ tab_history  = tabs[3]
 tab_budget   = tabs[4]
 if IS_ADMIN:
     tab_admin    = tabs[5]
-    tab_settings = tabs[6]
+    tab_reports  = tabs[6]
+    tab_settings = tabs[7]
 else:
-    tab_settings = tabs[5]
+    tab_reports  = tabs[5]
+    tab_settings = tabs[6]
 
 # ─── Load current-month data once ─────────────────────────────
 expenses_df    = db.get_expenses(CURRENT_MONTH, CURRENT_USER)
@@ -1024,7 +1027,199 @@ if IS_ADMIN:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 7 · SETTINGS — categories + alerts
+# TAB 6/7 · REPORTS — generate & export detailed reports
+# ═══════════════════════════════════════════════════════════════
+with tab_reports:
+    st.markdown("### 📥 Reports & Export")
+    st.caption("Generate detailed reports and export data for any time period.")
+    
+    st.markdown("#### 📅 Select Time Period")
+    col1, col2 = st.columns(2)
+    with col1:
+        report_start = st.date_input("Start Date", value=date(date.today().year, date.today().month, 1), key="report_start")
+    with col2:
+        report_end = st.date_input("End Date", value=date.today(), key="report_end")
+    
+    if report_start > report_end:
+        st.error("Start date must be before end date!")
+        st.stop()
+    
+    # Filter transactions for selected period
+    start_str = report_start.strftime("%Y-%m-%d")
+    end_str = report_end.strftime("%Y-%m-%d")
+    
+    all_period_txns = db.get_transactions(None, CURRENT_USER)
+    if not all_period_txns.empty:
+        period_txns = all_period_txns[
+            (all_period_txns["Date"] >= start_str) & 
+            (all_period_txns["Date"] <= end_str)
+        ].copy()
+    else:
+        period_txns = pd.DataFrame()
+    
+    period_expenses = period_txns[period_txns["Type"] == "Expense"] if not period_txns.empty else pd.DataFrame()
+    period_investments = period_txns[period_txns["Type"] == "Investment"] if not period_txns.empty else pd.DataFrame()
+    
+    # Summary stats
+    st.markdown("---")
+    st.markdown("#### 📊 Summary for Selected Period")
+    
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        total_exp = period_expenses["Amount"].sum() if not period_expenses.empty else 0
+        st.metric("💸 Total Spent", format_inr(total_exp))
+    with m2:
+        total_inv = period_investments["Amount"].sum() if not period_investments.empty else 0
+        st.metric("📈 Total Invested", format_inr(total_inv))
+    with m3:
+        total_txns = len(period_txns)
+        st.metric("📝 Transactions", total_txns)
+    with m4:
+        date_range = (report_end - report_start).days + 1
+        st.metric("📆 Days", date_range)
+    
+    if not period_txns.empty:
+        st.markdown("---")
+        
+        # Category breakdown
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🍩 Spending by Category")
+            if not period_expenses.empty:
+                cat_break = category_breakdown(period_expenses)
+                cat_break["% of Total"] = (cat_break["Amount"] / cat_break["Amount"].sum() * 100).round(1)
+                st.dataframe(cat_break[["Category", "Amount", "% of Total"]], use_container_width=True, hide_index=True)
+            else:
+                st.info("No expenses in this period.")
+        
+        with col2:
+            st.markdown("#### 📈 Investments by Category")
+            if not period_investments.empty:
+                inv_break = category_breakdown(period_investments)
+                inv_break["% of Total"] = (inv_break["Amount"] / inv_break["Amount"].sum() * 100).round(1)
+                st.dataframe(inv_break[["Category", "Amount", "% of Total"]], use_container_width=True, hide_index=True)
+            else:
+                st.info("No investments in this period.")
+        
+        # Payment method breakdown (expenses only)
+        if not period_expenses.empty and "Payment" in period_expenses.columns:
+            st.markdown("---")
+            st.markdown("#### 💳 Spending by Payment Method")
+            pay_break = period_expenses[period_expenses["Payment"].notna() & (period_expenses["Payment"] != "—")].groupby("Payment")["Amount"].sum().reset_index()
+            pay_break.columns = ["Payment Method", "Amount"]
+            pay_break["% of Total"] = (pay_break["Amount"] / pay_break["Amount"].sum() * 100).round(1)
+            st.dataframe(pay_break, use_container_width=True, hide_index=True)
+        
+        # Daily breakdown
+        st.markdown("---")
+        st.markdown("#### 📅 Daily Summary")
+        if not period_txns.empty:
+            daily_summary = period_txns.groupby("Date").agg({
+                "Amount": "sum"
+            }).reset_index()
+            daily_summary.columns = ["Date", "Total"]
+            daily_summary["Total"] = daily_summary["Total"].apply(format_inr)
+            st.dataframe(daily_summary, use_container_width=True, hide_index=True)
+        
+        # Export section
+        st.markdown("---")
+        st.markdown("#### 📥 Download Reports")
+        
+        # Detailed CSV
+        csv_data = period_txns.copy()
+        if not csv_data.empty:
+            csv_data = csv_data.sort_values("Date", ascending=False)
+        
+        csv_buf = io.StringIO()
+        csv_data.to_csv(csv_buf, index=False)
+        csv_content = csv_buf.getvalue()
+        
+        st.download_button(
+            label="📊 Download Detailed CSV",
+            data=csv_content,
+            file_name=f"fintrack_detailed_{report_start.strftime('%Y-%m-%d')}_to_{report_end.strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+            key="detailed_csv_download"
+        )
+        
+        # Summary report
+        summary_report = f"""NEXGEN FINTRACK — FINANCIAL REPORT
+Generated: {date.today().strftime('%d %b %Y')}
+Report Period: {report_start.strftime('%d %b %Y')} to {report_end.strftime('%d %b %Y')}
+User: {CURRENT_USER_NAME}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 SUMMARY STATISTICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Days: {date_range}
+Total Transactions: {total_txns}
+Total Spent (Expenses): {format_inr(total_exp)}
+Total Invested: {format_inr(total_inv)}
+Net Change: {format_inr(total_inv - total_exp)}
+
+"""
+        
+        if not period_expenses.empty:
+            avg_daily = total_exp / date_range if date_range > 0 else 0
+            summary_report += f"""Average Daily Spending: {format_inr(avg_daily)}
+Highest Expense Day: {period_expenses.groupby('Date')['Amount'].sum().idxmax() if len(period_expenses) > 0 else 'N/A'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💸 EXPENSE BREAKDOWN BY CATEGORY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+            cat_break_for_report = category_breakdown(period_expenses)
+            for _, row in cat_break_for_report.iterrows():
+                pct = (row["Amount"] / total_exp * 100) if total_exp > 0 else 0
+                summary_report += f"{row['Category']:<25} {format_inr(row['Amount']):>12}  ({pct:5.1f}%)\n"
+        
+        if not period_investments.empty:
+            summary_report += f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 INVESTMENT BREAKDOWN BY CATEGORY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+            inv_break_for_report = category_breakdown(period_investments)
+            for _, row in inv_break_for_report.iterrows():
+                pct = (row["Amount"] / total_inv * 100) if total_inv > 0 else 0
+                summary_report += f"{row['Category']:<25} {format_inr(row['Amount']):>12}  ({pct:5.1f}%)\n"
+        
+        if not period_expenses.empty and "Payment" in period_expenses.columns:
+            summary_report += f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💳 PAYMENT METHOD BREAKDOWN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+            pay_break_for_report = period_expenses[period_expenses["Payment"].notna() & (period_expenses["Payment"] != "—")].groupby("Payment")["Amount"].sum()
+            for method, amount in pay_break_for_report.items():
+                pct = (amount / total_exp * 100) if total_exp > 0 else 0
+                summary_report += f"{method:<25} {format_inr(amount):>12}  ({pct:5.1f}%)\n"
+        
+        summary_report += """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Made by Sheshank with ❤️🧠
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        
+        st.download_button(
+            label="📄 Download Summary Report (TXT)",
+            data=summary_report,
+            file_name=f"fintrack_summary_{report_start.strftime('%Y-%m-%d')}_to_{report_end.strftime('%Y-%m-%d')}.txt",
+            mime="text/plain",
+            key="summary_report_download"
+        )
+    else:
+        st.info(f"No transactions found for {report_start.strftime('%d %b %Y')} to {report_end.strftime('%d %b %Y')}. Add some to see reports!")
+    
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 7/8 · SETTINGS — categories + alerts
 # ═══════════════════════════════════════════════════════════════
 with tab_settings:
     st.markdown("### ⚙️ Settings")
