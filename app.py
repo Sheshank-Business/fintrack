@@ -195,17 +195,32 @@ CHART_COLORS = [
     "#FBBF24", "#34D399", "#22D3EE", "#60A5FA", "#818CF8",
 ]
 PAYMENT_METHODS = ["💵 Cash", "💳 Credit Card", "📱 UPI", "🏦 Net Banking"]
+CREDIT_LINE = "Made by Sheshank with ❤️🧠"
 
 # ─── Session state ────────────────────────────────────────────
 if "edit_idx" not in st.session_state:
     st.session_state.edit_idx = None
 if "confirm_delete_idx" not in st.session_state:
     st.session_state.confirm_delete_idx = None
+if "sidebar_open" not in st.session_state:
+    st.session_state.sidebar_open = True
 
 # ─── Dynamic categories & current month ───────────────────────
 EXPENSE_CATS = get_expense_categories(db, CURRENT_USER)
 INVEST_CATS  = get_investment_categories(db, CURRENT_USER)
 CURRENT_MONTH = date.today().strftime("%Y-%m")
+
+if not st.session_state.sidebar_open:
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] {
+            margin-left: -22rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ═══════════════════════════════════════════════════════════════
 # SIDEBAR — user info + quick stats + logout
@@ -276,40 +291,10 @@ with col1:
         unsafe_allow_html=True,
     )
 with col2:
-    # Hamburger menu to toggle sidebar
-    st.markdown("""
-    <style>
-    .hamburger-btn {
-        background: rgba(108, 99, 255, 0.2);
-        border: 2px solid rgba(108, 99, 255, 0.4);
-        border-radius: 8px;
-        padding: 8px;
-        cursor: pointer;
-        font-size: 24px;
-        width: 100%;
-        text-align: center;
-        transition: all 0.3s ease;
-    }
-    .hamburger-btn:hover {
-        background: rgba(108, 99, 255, 0.4);
-        border-color: rgba(108, 99, 255, 0.7);
-    }
-    </style>
-    <script>
-    function toggleSidebar() {
-        const sidebar = document.querySelector('[data-testid="stSidebar"]');
-        if (sidebar) {
-            sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
-        }
-    }
-    </script>
-    """, unsafe_allow_html=True)
-    if st.button("☰", help="Toggle sidebar", key="sidebar_toggle_btn"):
-        st.markdown(
-            "<script>document.querySelector('[data-testid=\"stSidebar\"]').style.display = "
-            "document.querySelector('[data-testid=\"stSidebar\"]').style.display === 'none' ? 'block' : 'none';</script>",
-            unsafe_allow_html=True
-        )
+    toggle_label = "☰" if st.session_state.sidebar_open else "☰"
+    if st.button(toggle_label, help="Open/Close sidebar", key="sidebar_toggle_btn", use_container_width=True):
+        st.session_state.sidebar_open = not st.session_state.sidebar_open
+        st.rerun()
 
 # ═══════════════════════════════════════════════════════════════
 # TABS
@@ -348,6 +333,7 @@ alert          = check_alert(remaining, budget_val)
 # ═══════════════════════════════════════════════════════════════
 with tab_add:
     st.markdown("### ➕ Add Transaction")
+    st.caption(CREDIT_LINE)
 
     txn_type_sel = st.radio(
         "Type",
@@ -462,6 +448,7 @@ with tab_add:
 # ═══════════════════════════════════════════════════════════════
 with tab_overview:
     st.markdown(f"### 📊 {get_month_label(CURRENT_MONTH)} Overview")
+    st.caption(CREDIT_LINE)
 
     if alert == "critical":
         st.markdown('<div class="alert-critical">🚨 <strong>Budget Overspent!</strong> You\'ve gone over your budget this month.</div>', unsafe_allow_html=True)
@@ -577,6 +564,7 @@ with tab_overview:
 # ═══════════════════════════════════════════════════════════════
 with tab_analytics:
     st.markdown("### 📈 Analytics & Insights")
+    st.caption(CREDIT_LINE)
 
     all_txns_bulk    = db.get_transactions(None, CURRENT_USER)
     all_budgets_bulk = db.get_all_budgets(CURRENT_USER)
@@ -752,6 +740,7 @@ with tab_analytics:
 # ═══════════════════════════════════════════════════════════════
 with tab_history:
     st.markdown("### 📜 Transaction History")
+    st.caption(CREDIT_LINE)
 
     h_col1, h_col2 = st.columns([3, 2])
     with h_col1:
@@ -879,6 +868,7 @@ with tab_history:
 # ═══════════════════════════════════════════════════════════════
 with tab_budget:
     st.markdown("### 💰 Budget Setup")
+    st.caption(CREDIT_LINE)
     st.caption("Set your monthly limits once — update only when needed.")
 
     btab_exp, btab_inv = st.tabs(["💸 Expense Budget", "📈 Investment Budget"])
@@ -1026,6 +1016,7 @@ with tab_budget:
 if IS_ADMIN:
     with tab_admin:
         st.markdown("### 👑 Admin Panel")
+        st.caption(CREDIT_LINE)
         st.caption("View all family members' financial data.")
         st.markdown("---")
 
@@ -1088,6 +1079,7 @@ if IS_ADMIN:
 # ═══════════════════════════════════════════════════════════════
 with tab_settings:
     st.markdown("### ⚙️ Settings")
+    st.caption(CREDIT_LINE)
     stab1, stab2, stab3 = st.tabs(["📂 My Categories", "⚠️ Alerts", "🗄️ App Info"])
 
     with stab1:
