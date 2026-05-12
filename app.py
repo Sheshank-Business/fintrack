@@ -56,7 +56,7 @@ st.set_page_config(
     page_title="💰 Nexgen Fintrack",
     page_icon="💰",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ─── Load Custom CSS ──────────────────────────────────────────
@@ -202,99 +202,36 @@ if "edit_idx" not in st.session_state:
     st.session_state.edit_idx = None
 if "confirm_delete_idx" not in st.session_state:
     st.session_state.confirm_delete_idx = None
-if "sidebar_open" not in st.session_state:
-    st.session_state.sidebar_open = True
 
 # ─── Dynamic categories & current month ───────────────────────
 EXPENSE_CATS = get_expense_categories(db, CURRENT_USER)
 INVEST_CATS  = get_investment_categories(db, CURRENT_USER)
 CURRENT_MONTH = date.today().strftime("%Y-%m")
 
-if not st.session_state.sidebar_open:
-    st.markdown(
-        """
-        <style>
-        section[data-testid="stSidebar"] {
-            margin-left: -22rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# ═══════════════════════════════════════════════════════════════
-# SIDEBAR — user info + quick stats + logout
-# ═══════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown("## 💰 Nexgen Fintrack")
-    if IS_ADMIN:
-        st.markdown(f"**👤 {CURRENT_USER_NAME}** 👑 *Admin*")
-    else:
-        st.markdown(f"**👤 {CURRENT_USER_NAME}**")
-    st.markdown("---")
-
-    # Quick stats
-    _today_str = date.today().strftime("%Y-%m-%d")
-    _month_txns = db.get_transactions(CURRENT_MONTH, CURRENT_USER)
-    if not _month_txns.empty:
-        _today_exp = _month_txns[
-            (_month_txns["Date"] == _today_str) & (_month_txns["Type"] == "Expense")
-        ]["Amount"].sum()
-        _month_exp  = _month_txns[_month_txns["Type"] == "Expense"]["Amount"].sum()
-        _month_bud  = db.get_budget(CURRENT_MONTH, CURRENT_USER)
-        _remaining  = _month_bud - _month_exp if _month_bud > 0 else None
-
-        st.markdown("**📅 Today**")
-        st.markdown(
-            f"<div style='background:rgba(255,255,255,0.05);border-radius:10px;padding:10px 14px;'>"
-            f"<div style='font-size:1.3rem;font-weight:700;color:#FF8A65;'>{format_inr(_today_exp)}</div>"
-            f"<div style='font-size:0.75rem;color:#9BA1B0;'>spent today</div></div>",
-            unsafe_allow_html=True,
-        )
-        if _remaining is not None:
-            color = "#FF5252" if _remaining < 0 else "#34D399" if _remaining > _month_bud * 0.3 else "#FFD740"
-            st.markdown(
-                f"<div style='background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 14px;margin-top:8px;'>"
-                f"<div style='font-size:1.1rem;font-weight:600;color:{color};'>{format_inr(_remaining)}</div>"
-                f"<div style='font-size:0.75rem;color:#9BA1B0;'>remaining this month</div></div>",
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("No transactions this month yet.")
-
-    st.markdown("---")
-    st.markdown(
-        f"<div style='text-align:center;color:#9BA1B0;font-size:0.75rem;'>"
-        f"Nexgen Fintrack v3 · <span style='color:#6C63FF;'>{DB_MODE}</span></div>",
-        unsafe_allow_html=True,
-    )
-    if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
-        if DB_MODE.startswith("☁️") and AUTH_MODE == "google":
-            st.logout()
-        elif DB_MODE.startswith("☁️"):
-            st.session_state.pop("ft_simple_user_id", None)
-            st.session_state.pop("ft_simple_user_name", None)
-            st.rerun()
-        else:
-            st.session_state.pop("ft_local_user", None)
-            st.rerun()
+# Hide Streamlit sidebar completely; app now runs without sidebar controls.
+st.markdown(
+    """
+    <style>
+    section[data-testid="stSidebar"] {
+        display: none !important;
+    }
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ═══════════════════════════════════════════════════════════════
-# HEADER + SIDEBAR TOGGLE
+# HEADER
 # ═══════════════════════════════════════════════════════════════
-col1, col2 = st.columns([0.9, 0.1])
-with col1:
-    st.markdown('<p class="app-title">💰 Nexgen Fintrack</p>', unsafe_allow_html=True)
-    st.markdown(
-        f'<p class="app-subtitle">{get_month_label(CURRENT_MONTH)} · Hey {CURRENT_USER_NAME}!</p>',
-        unsafe_allow_html=True,
-    )
-with col2:
-    toggle_label = "☰" if st.session_state.sidebar_open else "☰"
-    if st.button(toggle_label, help="Open/Close sidebar", key="sidebar_toggle_btn", use_container_width=True):
-        st.session_state.sidebar_open = not st.session_state.sidebar_open
-        st.rerun()
+st.markdown('<p class="app-title">💰 Nexgen Fintrack</p>', unsafe_allow_html=True)
+st.markdown(
+    f'<p class="app-subtitle">{get_month_label(CURRENT_MONTH)} · Hey {CURRENT_USER_NAME}!</p>',
+    unsafe_allow_html=True,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # TABS
@@ -333,7 +270,6 @@ alert          = check_alert(remaining, budget_val)
 # ═══════════════════════════════════════════════════════════════
 with tab_add:
     st.markdown("### ➕ Add Transaction")
-    st.caption(CREDIT_LINE)
 
     txn_type_sel = st.radio(
         "Type",
@@ -442,13 +378,15 @@ with tab_add:
                     unsafe_allow_html=True,
                 )
 
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 2 · OVERVIEW — current month summary
 # ═══════════════════════════════════════════════════════════════
 with tab_overview:
     st.markdown(f"### 📊 {get_month_label(CURRENT_MONTH)} Overview")
-    st.caption(CREDIT_LINE)
 
     if alert == "critical":
         st.markdown('<div class="alert-critical">🚨 <strong>Budget Overspent!</strong> You\'ve gone over your budget this month.</div>', unsafe_allow_html=True)
@@ -558,13 +496,15 @@ with tab_overview:
     else:
         st.info("No expenses this month yet. Go to ➕ Add to log your first one!")
 
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 3 · ANALYTICS — trends, insights, comparisons
 # ═══════════════════════════════════════════════════════════════
 with tab_analytics:
     st.markdown("### 📈 Analytics & Insights")
-    st.caption(CREDIT_LINE)
 
     all_txns_bulk    = db.get_transactions(None, CURRENT_USER)
     all_budgets_bulk = db.get_all_budgets(CURRENT_USER)
@@ -734,13 +674,15 @@ with tab_analytics:
     else:
         st.info("Not enough data yet — add some transactions first!")
 
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 4 · HISTORY — view, edit, delete, export
 # ═══════════════════════════════════════════════════════════════
 with tab_history:
     st.markdown("### 📜 Transaction History")
-    st.caption(CREDIT_LINE)
 
     h_col1, h_col2 = st.columns([3, 2])
     with h_col1:
@@ -862,13 +804,15 @@ with tab_history:
     else:
         st.info(f"No transactions in {get_month_label(hist_month)}.")
 
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 5 · BUDGET — set once, two inner tabs
 # ═══════════════════════════════════════════════════════════════
 with tab_budget:
     st.markdown("### 💰 Budget Setup")
-    st.caption(CREDIT_LINE)
     st.caption("Set your monthly limits once — update only when needed.")
 
     btab_exp, btab_inv = st.tabs(["💸 Expense Budget", "📈 Investment Budget"])
@@ -1009,6 +953,9 @@ with tab_budget:
                     unsafe_allow_html=True,
                 )
 
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 6 · ADMIN (admin only)
@@ -1016,7 +963,6 @@ with tab_budget:
 if IS_ADMIN:
     with tab_admin:
         st.markdown("### 👑 Admin Panel")
-        st.caption(CREDIT_LINE)
         st.caption("View all family members' financial data.")
         st.markdown("---")
 
@@ -1073,13 +1019,15 @@ if IS_ADMIN:
             else:
                 st.info("No transactions found.")
 
+        st.markdown("---")
+        st.caption(CREDIT_LINE)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 7 · SETTINGS — categories + alerts
 # ═══════════════════════════════════════════════════════════════
 with tab_settings:
     st.markdown("### ⚙️ Settings")
-    st.caption(CREDIT_LINE)
     stab1, stab2, stab3 = st.tabs(["📂 My Categories", "⚠️ Alerts", "🗄️ App Info"])
 
     with stab1:
@@ -1178,6 +1126,20 @@ with tab_settings:
             f"<b>Total transactions:</b> {total_txns}<br>"
             f"<b>Expense categories:</b> {len(EXPENSE_CATS)}<br>"
             f"<b>Investment categories:</b> {len(INVEST_CATS)}<br>"
-            f"<br><span style='font-size:0.85rem;color:#9BA1B0;'>Made by Sheshank with ❤️</span></div>",
+            f"<br><span style='font-size:0.85rem;color:#9BA1B0;'>Made by Sheshank with ❤️🧠</span></div>",
             unsafe_allow_html=True,
         )
+
+        if st.button("🚪 Logout", use_container_width=True, key="logout_btn_settings"):
+            if DB_MODE.startswith("☁️") and AUTH_MODE == "google":
+                st.logout()
+            elif DB_MODE.startswith("☁️"):
+                st.session_state.pop("ft_simple_user_id", None)
+                st.session_state.pop("ft_simple_user_name", None)
+                st.rerun()
+            else:
+                st.session_state.pop("ft_local_user", None)
+                st.rerun()
+
+    st.markdown("---")
+    st.caption(CREDIT_LINE)
