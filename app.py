@@ -1,10 +1,9 @@
 """
 app.py — Nexgen Fintrack V3
 Simple, mobile-first personal finance tracker.
-New UX: Add (front) | Overview | Analytics | History | Budget | Admin | Settings
+New UX: Add | Analytics (Overview+Analytics merged) | Reports (History+Reports merged) | Budget (with Borrow/Lend) | Admin | Settings
 Auth: Name-only login with optional "Remember Me"
-Sidebar: Fully collapsible with hamburger menu ☰
-Made by Sheshank with ❤️
+Made by Sheshank with ❤️ & 🧠
 """
 
 import json
@@ -195,7 +194,7 @@ CHART_COLORS = [
     "#FBBF24", "#34D399", "#22D3EE", "#60A5FA", "#818CF8",
 ]
 PAYMENT_METHODS = ["💵 Cash", "💳 Credit Card", "📱 UPI", "🏦 Net Banking"]
-CREDIT_LINE = "Made by Sheshank with ❤️🧠"
+CREDIT_LINE = "Made by Sheshank with ❤️ & 🧠"
 
 # ─── Session state ────────────────────────────────────────────
 if "edit_idx" not in st.session_state:
@@ -234,27 +233,23 @@ st.markdown(
 )
 
 # ═══════════════════════════════════════════════════════════════
-# TABS
+# TABS (Consolidated: Overview+Analytics merged, History+Reports merged)
 # ═══════════════════════════════════════════════════════════════
-tab_names = ["➕ Add", "📊 Overview", "📈 Analytics", "📜 History", "💰 Budget"]
+tab_names = ["➕ Add", "📈 Analytics", "📥 Reports", "💰 Budget"]
 if IS_ADMIN:
     tab_names.append("👑 Admin")
-tab_names.append("📥 Reports")
 tab_names.append("⚙️ Settings")
 
 tabs = st.tabs(tab_names)
 tab_add      = tabs[0]
-tab_overview = tabs[1]
-tab_analytics = tabs[2]
-tab_history  = tabs[3]
-tab_budget   = tabs[4]
+tab_analytics = tabs[1]  # Merged Overview + Analytics
+tab_reports  = tabs[2]   # Merged History + Reports
+tab_budget   = tabs[3]
 if IS_ADMIN:
-    tab_admin    = tabs[5]
-    tab_reports  = tabs[6]
-    tab_settings = tabs[7]
+    tab_admin    = tabs[4]
+    tab_settings = tabs[5]
 else:
-    tab_reports  = tabs[5]
-    tab_settings = tabs[6]
+    tab_settings = tabs[4]
 
 # ─── Load current-month data once ─────────────────────────────
 expenses_df    = db.get_expenses(CURRENT_MONTH, CURRENT_USER)
@@ -386,10 +381,11 @@ with tab_add:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 2 · OVERVIEW — current month summary
 # ═══════════════════════════════════════════════════════════════
-with tab_overview:
-    st.markdown(f"### 📊 {get_month_label(CURRENT_MONTH)} Overview")
+# TAB 2 · ANALYTICS — Overview & Analytics (merged)
+# ═══════════════════════════════════════════════════════════════
+with tab_analytics:
+    st.markdown(f"### 📈 {get_month_label(CURRENT_MONTH)} Analytics & Overview")
 
     if alert == "critical":
         st.markdown('<div class="alert-critical">🚨 <strong>Budget Overspent!</strong> You\'ve gone over your budget this month.</div>', unsafe_allow_html=True)
@@ -502,12 +498,8 @@ with tab_overview:
     st.markdown("---")
     st.caption(CREDIT_LINE)
 
-
-# ═══════════════════════════════════════════════════════════════
-# TAB 3 · ANALYTICS — trends, insights, comparisons
-# ═══════════════════════════════════════════════════════════════
-with tab_analytics:
-    st.markdown("### 📈 Analytics & Insights")
+    st.markdown("---")
+    st.markdown("## 📊 Detailed Analytics")
 
     all_txns_bulk    = db.get_transactions(None, CURRENT_USER)
     all_budgets_bulk = db.get_all_budgets(CURRENT_USER)
@@ -682,10 +674,10 @@ with tab_analytics:
 
 
 # ═══════════════════════════════════════════════════════════════
-# TAB 4 · HISTORY — view, edit, delete, export
+# TAB 3 · REPORTS — Transactions & Export (merged)
 # ═══════════════════════════════════════════════════════════════
-with tab_history:
-    st.markdown("### 📜 Transaction History")
+with tab_reports:
+    st.markdown("### 📥 Transaction History & Reports")
 
     h_col1, h_col2 = st.columns([3, 2])
     with h_col1:
@@ -815,10 +807,10 @@ with tab_history:
 # TAB 5 · BUDGET — set once, two inner tabs
 # ═══════════════════════════════════════════════════════════════
 with tab_budget:
-    st.markdown("### 💰 Budget Setup")
-    st.caption("Set your monthly limits once — update only when needed.")
+    st.markdown("### 💰 Budget & Loans Setup")
+    st.caption("Set budgets, investment targets, and track borrowed/lent money.")
 
-    btab_exp, btab_inv = st.tabs(["💸 Expense Budget", "📈 Investment Budget"])
+    btab_exp, btab_inv, btab_loan = st.tabs(["💸 Expense Budget", "📈 Investment Budget", "💳 Borrow & Lend"])
 
     # ── Expense Budget ─────────────────────────────────────────
     with btab_exp:
@@ -956,6 +948,101 @@ with tab_budget:
                     unsafe_allow_html=True,
                 )
 
+    # ── Borrow & Lend ──────────────────────────────────────────
+    with btab_loan:
+        st.markdown("#### 💳 Money Borrowed & Lent")
+        st.caption("Track money you've borrowed from others and money you've lent out.")
+        
+        _loan_key = f"borrow_lend__{CURRENT_USER}"
+        
+        def _get_loans() -> dict:
+            raw = db.get_config(_loan_key, "")
+            try:
+                return json.loads(raw) if raw else {}
+            except Exception:
+                return {}
+        
+        loans = _get_loans()
+        
+        # Display current loans
+        if loans:
+            st.markdown("**Active Loans:**")
+            borrow_cols = st.columns([3, 2, 2, 1])
+            with borrow_cols[0]:
+                st.markdown("**Person/Description**")
+            with borrow_cols[1]:
+                st.markdown("**Amount**")
+            with borrow_cols[2]:
+                st.markdown("**Type**")
+            with borrow_cols[3]:
+                st.markdown("**Action**")
+            
+            for loan_id, loan_info in loans.items():
+                if not isinstance(loan_info, dict):
+                    continue
+                loan_cols = st.columns([3, 2, 2, 1])
+                with loan_cols[0]:
+                    st.markdown(loan_info.get('person', 'Unknown'))
+                with loan_cols[1]:
+                    st.markdown(format_inr(float(loan_info.get('amount', 0))))
+                with loan_cols[2]:
+                    loan_type = loan_info.get('type', 'Borrow')
+                    st.markdown(f"{'📤 Lent' if loan_type == 'Lend' else '📥 Borrow'}")
+                with loan_cols[3]:
+                    if st.button("❌", key=f"delloan_{loan_id}"):
+                        del loans[loan_id]
+                        db.set_config(_loan_key, json.dumps(loans))
+                        st.rerun()
+            
+            # Summary
+            borrowed_total = sum(float(v.get('amount', 0)) for v in loans.values() if v.get('type') == 'Borrow')
+            lent_total = sum(float(v.get('amount', 0)) for v in loans.values() if v.get('type') == 'Lend')
+            st.markdown("---")
+            lc1, lc2, lc3 = st.columns(3)
+            with lc1:
+                st.metric("📥 Total Borrowed", format_inr(borrowed_total))
+            with lc2:
+                st.metric("📤 Total Lent Out", format_inr(lent_total))
+            with lc3:
+                net = lent_total - borrowed_total
+                st.metric("🔄 Net Balance", format_inr(net), delta=f"{'Owed' if net < 0 else 'Owe'}" if net != 0 else None)
+        else:
+            st.info("No active loans yet. Add one below!")
+        
+        st.markdown("---")
+        st.markdown("**Add New Loan:**")
+        with st.form("loan_form", clear_on_submit=True):
+            l1, l2 = st.columns(2)
+            with l1:
+                loan_person = st.text_input("Person/Entity Name", placeholder="e.g., Mom, Brother, Bank",
+                                           label_visibility="collapsed")
+                loan_amount = st.number_input("Amount (₹)", min_value=100, max_value=10_000_000,
+                                             value=5000, step=500)
+            with l2:
+                loan_type = st.radio("Type", ["📥 Borrowed", "📤 Lent"], horizontal=True,
+                                    label_visibility="collapsed")
+                loan_date_added = st.date_input("Date", value=date.today(), key="loan_date")
+            
+            loan_note = st.text_input("Note (optional)", placeholder="e.g., Due date: Jun 30",
+                                     label_visibility="collapsed")
+            loan_submitted = st.form_submit_button("➕ Add Loan", use_container_width=True)
+        
+        if loan_submitted:
+            if not loan_person.strip():
+                st.error("Please enter person/entity name.")
+            else:
+                loan_id = f"loan_{int(datetime.now().timestamp())}"
+                loans[loan_id] = {
+                    'person': loan_person.strip(),
+                    'amount': loan_amount,
+                    'type': 'Lend' if '📤' in loan_type else 'Borrow',
+                    'date': loan_date_added.strftime("%Y-%m-%d"),
+                    'note': loan_note
+                }
+                db.set_config(_loan_key, json.dumps(loans))
+                st.toast(f"Loan added: {loan_person}", icon="✅")
+                st.rerun()
+
     st.markdown("---")
     st.caption(CREDIT_LINE)
 
@@ -1025,16 +1112,9 @@ if IS_ADMIN:
         st.markdown("---")
         st.caption(CREDIT_LINE)
 
-
-# ═══════════════════════════════════════════════════════════════
-# TAB 6/7 · REPORTS — generate & export detailed reports
-# ═══════════════════════════════════════════════════════════════
-with tab_reports:
-    st.markdown("### 📥 Reports & Export")
-    st.caption("Generate detailed reports and export data for any time period.")
-    
-    st.markdown("#### 📅 Select Time Period")
-    col1, col2 = st.columns(2)
+    st.markdown("---")
+    st.markdown("## 📥 Generate & Export Reports")
+    st.caption("Create detailed reports and export data for any time period.")
     with col1:
         report_start = st.date_input("Start Date", value=date(date.today().year, date.today().month, 1), key="report_start")
     with col2:
