@@ -2,6 +2,8 @@
 app.py — Nexgen Fintrack V3
 Simple, mobile-first personal finance tracker.
 New UX: Add (front) | Overview | Analytics | History | Budget | Admin | Settings
+Auth: Name-only login with optional "Remember Me"
+Sidebar: Fully collapsible with hamburger menu ☰
 Made by Sheshank with ❤️
 """
 
@@ -107,26 +109,32 @@ def _family_auth_login(mode: str) -> tuple[str, str]:
             st.session_state.get("ft_simple_user_id", "default"),
             st.session_state.get("ft_simple_user_name", "default"),
         )
-    shared_passcode = str(st.secrets.get("app_auth", {}).get("shared_passcode", "")).strip()
-    if mode == "passcode" and not shared_passcode:
-        st.error("App auth is set to passcode mode, but shared_passcode is missing in secrets.")
-        st.stop()
     st.title("💸 Nexgen Fintrack")
-    st.write("Family login")
+    st.write("Welcome to your personal finance dashboard")
+    
     with st.form("family_login_form", clear_on_submit=False):
-        display_name = st.text_input("Your name", placeholder="e.g. Shanky")
-        passcode_input = ""
-        if mode == "passcode":
-            passcode_input = st.text_input("Family passcode", type="password")
-        submit_login = st.form_submit_button("Continue", use_container_width=True)
+        display_name = st.text_input("Enter your name", placeholder="e.g. Sheshank")
+        col1, col2 = st.columns(2)
+        with col1:
+            submit_login = st.form_submit_button("✅ Continue", use_container_width=True)
+        with col2:
+            remember = st.checkbox("Remember me", value=True)
+    
     if submit_login:
         if not display_name.strip():
             st.error("Please enter your name.")
-        elif mode == "passcode" and passcode_input.strip() != shared_passcode:
-            st.error("Wrong passcode.")
         else:
             st.session_state["ft_simple_user_name"] = display_name.strip()
             st.session_state["ft_simple_user_id"] = _normalize_user_id(display_name)
+            
+            # Save to localStorage if Remember Me is checked
+            if remember:
+                st.markdown(f"""
+                <script>
+                localStorage.setItem('fintrack_user_name', '{display_name.strip()}');
+                </script>
+                """, unsafe_allow_html=True)
+            
             st.rerun()
     st.stop()
 
@@ -157,7 +165,8 @@ if not CURRENT_USER_NAME:
 def _is_admin() -> bool:
     try:
         admin_user = st.secrets.get("app_auth", {}).get("admin_user", "").strip()
-        return bool(admin_user and CURRENT_USER == admin_user)
+        admin_normalized = _normalize_user_id(admin_user)
+        return bool(admin_normalized and CURRENT_USER == admin_normalized)
     except Exception:
         return False
 
@@ -257,13 +266,50 @@ with st.sidebar:
 
 
 # ═══════════════════════════════════════════════════════════════
-# HEADER
+# HEADER + SIDEBAR TOGGLE
 # ═══════════════════════════════════════════════════════════════
-st.markdown('<p class="app-title">💰 Nexgen Fintrack</p>', unsafe_allow_html=True)
-st.markdown(
-    f'<p class="app-subtitle">{get_month_label(CURRENT_MONTH)} · Hey {CURRENT_USER_NAME}!</p>',
-    unsafe_allow_html=True,
-)
+col1, col2 = st.columns([0.9, 0.1])
+with col1:
+    st.markdown('<p class="app-title">💰 Nexgen Fintrack</p>', unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="app-subtitle">{get_month_label(CURRENT_MONTH)} · Hey {CURRENT_USER_NAME}!</p>',
+        unsafe_allow_html=True,
+    )
+with col2:
+    # Hamburger menu to toggle sidebar
+    st.markdown("""
+    <style>
+    .hamburger-btn {
+        background: rgba(108, 99, 255, 0.2);
+        border: 2px solid rgba(108, 99, 255, 0.4);
+        border-radius: 8px;
+        padding: 8px;
+        cursor: pointer;
+        font-size: 24px;
+        width: 100%;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+    .hamburger-btn:hover {
+        background: rgba(108, 99, 255, 0.4);
+        border-color: rgba(108, 99, 255, 0.7);
+    }
+    </style>
+    <script>
+    function toggleSidebar() {
+        const sidebar = document.querySelector('[data-testid="stSidebar"]');
+        if (sidebar) {
+            sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+        }
+    }
+    </script>
+    """, unsafe_allow_html=True)
+    if st.button("☰", help="Toggle sidebar", key="sidebar_toggle_btn"):
+        st.markdown(
+            "<script>document.querySelector('[data-testid=\"stSidebar\"]').style.display = "
+            "document.querySelector('[data-testid=\"stSidebar\"]').style.display === 'none' ? 'block' : 'none';</script>",
+            unsafe_allow_html=True
+        )
 
 # ═══════════════════════════════════════════════════════════════
 # TABS
