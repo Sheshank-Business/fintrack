@@ -77,10 +77,13 @@ def add_transaction(
     _save_data(data)
 
 
-def delete_transaction(index: int) -> bool:
+def delete_transaction(index: int, username: str = "default") -> bool:
     """Delete a transaction by its index in the full list. Returns True if deleted."""
     data = _load_data()
-    if 0 <= index < len(data["transactions"]):
+    if (
+        0 <= index < len(data["transactions"])
+        and data["transactions"][index].get("Username", "default") == username
+    ):
         data["transactions"].pop(index)
         _save_data(data)
         return True
@@ -94,10 +97,14 @@ def update_transaction(
     amount: float,
     txn_type: str,
     note: str = "",
+    username: str = "default",
 ) -> bool:
     """Update a transaction by its index. Returns True if updated."""
     data = _load_data()
-    if 0 <= index < len(data["transactions"]):
+    if (
+        0 <= index < len(data["transactions"])
+        and data["transactions"][index].get("Username", "default") == username
+    ):
         data["transactions"][index].update({
             "Date": date,
             "Category": category,
@@ -111,17 +118,21 @@ def update_transaction(
     return False
 
 
-def get_transactions_with_index(month: str | None = None) -> pd.DataFrame:
+def get_transactions_with_index(month: str | None = None, username: str = "default") -> pd.DataFrame:
     """Like get_transactions but keeps a '_idx' column = original JSON index."""
     data = _load_data()
     txns = data.get("transactions", [])
     if not txns:
         return pd.DataFrame(columns=["_idx", "Date", "Category", "Amount", "Type", "Note"])
     df = pd.DataFrame(txns)
-    df.insert(0, "_idx", range(len(df)))
+    df.insert(0, "_idx", df.index)
+    if "Username" in df.columns:
+        df = df[df["Username"] == username]
     df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce").fillna(0)
     if "Timestamp" in df.columns:
         df = df.drop(columns=["Timestamp"])
+    if "Username" in df.columns:
+        df = df.drop(columns=["Username"])
     if month:
         df = df[df["Date"].str.startswith(month)]
     return df.reset_index(drop=True)

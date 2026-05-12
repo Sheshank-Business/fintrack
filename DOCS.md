@@ -1,4 +1,4 @@
-# 📖 Fintrack — Complete Technical Documentation
+        # 📖 Fintrack — Complete Technical Documentation
 > **Version:** 1.0 | **Last Updated:** April 2026 | **Author:** Shanky
 > 
 > *This document is the single source of truth for the Fintrack project — architecture, data flow, stack decisions, and implementation details.*

@@ -50,7 +50,7 @@ CONFIG_KEY_INVEST_CATS   = "custom_investment_categories"
 
 
 # ─── Dynamic Category Loader ─────────────────────────────────────
-def get_expense_categories(db=None) -> list[str]:
+def get_expense_categories(db=None, username: str = "default") -> list[str]:
     """
     Return expense categories.
     If db is provided, loads user-customised list from config.
@@ -60,7 +60,7 @@ def get_expense_categories(db=None) -> list[str]:
         return DEFAULT_EXPENSE_CATEGORIES
     try:
         import json
-        raw = db.get_config(CONFIG_KEY_EXPENSE_CATS, "")
+        raw = db.get_config(f"{CONFIG_KEY_EXPENSE_CATS}__{username}", "")
         if raw:
             cats = json.loads(raw)
             if cats:
@@ -70,13 +70,13 @@ def get_expense_categories(db=None) -> list[str]:
     return DEFAULT_EXPENSE_CATEGORIES
 
 
-def get_investment_categories(db=None) -> list[str]:
+def get_investment_categories(db=None, username: str = "default") -> list[str]:
     """Return investment categories (custom or default)."""
     if db is None:
         return DEFAULT_INVESTMENT_CATEGORIES
     try:
         import json
-        raw = db.get_config(CONFIG_KEY_INVEST_CATS, "")
+        raw = db.get_config(f"{CONFIG_KEY_INVEST_CATS}__{username}", "")
         if raw:
             cats = json.loads(raw)
             if cats:
@@ -86,14 +86,14 @@ def get_investment_categories(db=None) -> list[str]:
     return DEFAULT_INVESTMENT_CATEGORIES
 
 
-def save_expense_categories(db, cats: list[str]) -> None:
+def save_expense_categories(db, cats: list[str], username: str = "default") -> None:
     import json
-    db.set_config(CONFIG_KEY_EXPENSE_CATS, json.dumps(cats))
+    db.set_config(f"{CONFIG_KEY_EXPENSE_CATS}__{username}", json.dumps(cats))
 
 
-def save_investment_categories(db, cats: list[str]) -> None:
+def save_investment_categories(db, cats: list[str], username: str = "default") -> None:
     import json
-    db.set_config(CONFIG_KEY_INVEST_CATS, json.dumps(cats))
+    db.set_config(f"{CONFIG_KEY_INVEST_CATS}__{username}", json.dumps(cats))
 
 
 # ─── Helpers ─────────────────────────────────────────────────────

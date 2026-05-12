@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 from datetime import datetime, date
 import os
 import io
+import re
 
 from utils import (
     EXPENSE_CATEGORIES,
@@ -43,9 +44,10 @@ from budget import (
 
 # ─── Auto-detect database mode ────────────────────────────────
 try:
-    _ = st.secrets["gcp_service_account"]
-    import sheets as db
-    DB_MODE = "☁️ Cloud (Google Sheets)"
+    _ = st.secrets["supabase"]["url"]
+    _ = st.secrets["supabase"]["key"]
+    import supabase_db as db
+    DB_MODE = "☁️ Cloud (Supabase)"
 except (FileNotFoundError, KeyError, ModuleNotFoundError, Exception):
     import database as db
     DB_MODE = "💾 Local (JSON)"
@@ -68,14 +70,105 @@ try:
 except FileNotFoundError:
     pass
 
-# ─── Auth gate ──────────────────────────────────────
-from auth import is_logged_in, get_current_user, show_login, logout
-if not is_logged_in():
-    show_login(db)
+# ─── Auth gate (Google OAuth or family mode) ──────────────────
+def _get_auth_mode() -> str:
+    try:
+        mode = str(st.secrets.get("app_auth", {}).get("mode", "google")).strip().lower()
+        if mode in {"google", "passcode", "name_only"}:
+            return mode
+    except Exception:
+        pass
+    return "google"
+
+
+def _normalize_user_id(name: str) -> str:
+    user_id = re.sub(r"[^a-z0-9]+", "_", name.strip().lower())
+    user_id = user_id.strip("_")
+    return user_id or "guest"
+
+
+def _is_logged_in() -> bool:
+    try:
+        return bool(st.experimental_user.is_logged_in)
+    except Exception:
+        try:
+            return bool(st.user.is_logged_in)
+        except Exception:
+            return False
+
+
+def _get_user_email() -> str:
+    try:
+        return str(st.experimental_user.email)
+    except Exception:
+        try:
+            return str(st.user.email)
+        except Exception:
+            return ""
+
+
+def _family_auth_login(mode: str) -> tuple[str, str]:
+    if st.session_state.get("ft_simple_user_id"):
+        return (
+            st.session_state.get("ft_simple_user_id", "default"),
+            st.session_state.get("ft_simple_user_name", "default"),
+        )
+
+    shared_passcode = str(st.secrets.get("app_auth", {}).get("shared_passcode", "")).strip()
+    if mode == "passcode" and not shared_passcode:
+        st.error("App auth is set to passcode mode, but shared_passcode is missing in secrets.")
+        st.stop()
+
+    st.title("💸 Fintrack")
+    st.write("Family login")
+    with st.form("family_login_form", clear_on_submit=False):
+        display_name = st.text_input("Your name", placeholder="e.g. Shanky")
+        passcode_input = ""
+        if mode == "passcode":
+            passcode_input = st.text_input("Family passcode", type="password")
+        submit_login = st.form_submit_button("Continue", use_container_width=True)
+
+    if submit_login:
+        if not display_name.strip():
+            st.error("Please enter your name.")
+        elif mode == "passcode" and passcode_input.strip() != shared_passcode:
+            st.error("Wrong passcode.")
+        else:
+            st.session_state["ft_simple_user_name"] = display_name.strip()
+            st.session_state["ft_simple_user_id"] = _normalize_user_id(display_name)
+            st.rerun()
+
     st.stop()
 
-CURRENT_USER      = get_current_user()
-CURRENT_USER_NAME = st.session_state.get("ft_user_name", CURRENT_USER)
+
+AUTH_MODE = _get_auth_mode()
+
+if DB_MODE.startswith("☁️"):
+    if AUTH_MODE == "google":
+        if not _is_logged_in():
+            st.title("💸 Fintrack")
+            st.write("Sign in to access your personal finance dashboard.")
+            st.login("google")
+            st.stop()
+        CURRENT_USER = _get_user_email()
+        CURRENT_USER_NAME = CURRENT_USER.split("@")[0] if "@" in CURRENT_USER else CURRENT_USER
+    else:
+        CURRENT_USER, CURRENT_USER_NAME = _family_auth_login(AUTH_MODE)
+else:
+    CURRENT_USER = st.session_state.get("ft_local_user", "default")
+    CURRENT_USER_NAME = CURRENT_USER
+
+if not CURRENT_USER:
+    CURRENT_USER = "default"
+if not CURRENT_USER_NAME:
+    CURRENT_USER_NAME = CURRENT_USER
+
+# ─── Detect if user is admin ────────────────────────────────────
+def _is_admin() -> bool:
+    admin_user = st.secrets.get("app_auth", {}).get("admin_user", "").strip()
+    return bool(admin_user and CURRENT_USER == admin_user)
+
+IS_ADMIN = _is_admin()
 
 # Run 1-year cleanup silently on login (once per session)
 if not st.session_state.get("_cleanup_done"):
@@ -109,15 +202,18 @@ if "confirm_delete_idx" not in st.session_state:
     st.session_state.confirm_delete_idx = None
 
 # ─── Load dynamic categories ─────────────────────────────────
-EXPENSE_CATS  = get_expense_categories(db)
-INVEST_CATS   = get_investment_categories(db)
+EXPENSE_CATS  = get_expense_categories(db, CURRENT_USER)
+INVEST_CATS   = get_investment_categories(db, CURRENT_USER)
 
 # ═══════════════════════════════════════════════════════════════
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown(f"## 💰 Fintrack")
-    st.markdown(f"**👤 {CURRENT_USER_NAME}**")
+    if IS_ADMIN:
+        st.markdown(f"**👤 {CURRENT_USER_NAME}** 👑 *Admin*")
+    else:
+        st.markdown(f"**👤 {CURRENT_USER_NAME}**")
     st.markdown("---")
 
     # Quick add from sidebar
@@ -144,7 +240,15 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
-        logout()
+        if DB_MODE.startswith("☁️") and AUTH_MODE == "google":
+            st.logout()
+        elif DB_MODE.startswith("☁️"):
+            st.session_state.pop("ft_simple_user_id", None)
+            st.session_state.pop("ft_simple_user_name", None)
+            st.rerun()
+        else:
+            st.session_state.pop("ft_local_user", None)
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -166,7 +270,7 @@ with ctrl1:
         label_visibility="collapsed",
     )
 with ctrl2:
-    _cur_bud = db.get_budget(selected_month)
+    _cur_bud = db.get_budget(selected_month, CURRENT_USER)
     with st.form("budget_inline_form", clear_on_submit=False):
         _bud_val = st.number_input(
             "Budget (₹)", min_value=0, max_value=10_000_000,
@@ -175,7 +279,7 @@ with ctrl2:
             label_visibility="collapsed",
         )
         if st.form_submit_button("🎯 Set Budget"):
-            db.set_budget(selected_month, _bud_val)
+            db.set_budget(selected_month, _bud_val, CURRENT_USER)
             st.toast(f"Budget → {format_inr(_bud_val)}", icon="✅")
             st.rerun()
 with ctrl3:
@@ -206,13 +310,26 @@ alert     = check_alert(remaining, budget_val)
 # ═══════════════════════════════════════════════════════════════
 # TABS
 # ═══════════════════════════════════════════════════════════════
-tab_dash, tab_add, tab_history, tab_analytics, tab_settings = st.tabs([
+tab_names = [
     "📊 Dashboard",
     "➕ Add",
     "📜 History",
     "📈 Analytics",
-    "⚙️ Settings",
-])
+]
+if IS_ADMIN:
+    tab_names.append("👑 Admin")
+tab_names.append("⚙️ Settings")
+
+tabs = st.tabs(tab_names)
+tab_dash = tabs[0]
+tab_add = tabs[1]
+tab_history = tabs[2]
+tab_analytics = tabs[3]
+if IS_ADMIN:
+    tab_admin = tabs[4]
+    tab_settings = tabs[5]
+else:
+    tab_settings = tabs[4]
 
 # ───────────────────────────────────────────────────────────────
 # TAB 1 · DASHBOARD
@@ -368,6 +485,7 @@ with tab_add:
         db.add_transaction(
             txn_date.strftime("%Y-%m-%d"), category, amount,
             "Expense" if is_expense else "Investment", note,
+            username=CURRENT_USER,
         )
         st.toast(f"{'💸' if is_expense else '📈'} {format_inr(amount)} added!", icon="✅")
         st.balloons()
@@ -443,9 +561,9 @@ with tab_history:
         # Transaction rows with edit/delete
         # We need _idx for correct deletion — fetch indexed version
         try:
-            indexed_df = db.get_transactions_with_index(selected_month)
+            indexed_df = db.get_transactions_with_index(selected_month, CURRENT_USER)
         except AttributeError:
-            # sheets.py doesn't have get_transactions_with_index yet
+            # Fallback for backends that do not expose indexed reads.
             indexed_df = filtered.copy()
             indexed_df.insert(0, "_idx", filtered.index)
 
@@ -464,7 +582,7 @@ with tab_history:
         i_filtered = i_filtered.reset_index(drop=True)
 
         for i, row in i_filtered.iterrows():
-            real_idx = int(row["_idx"])
+            real_idx = row["_idx"]
             icon  = "💸" if row["Type"] == "Expense" else "📈"
             color = "#FF5252" if row["Type"] == "Expense" else "#00E676"
 
@@ -487,7 +605,7 @@ with tab_history:
                 with rc4:
                     if st.session_state.confirm_delete_idx == real_idx:
                         if st.button("✅ Sure?", key=f"confirm_{real_idx}", type="primary"):
-                            db.delete_transaction(real_idx)
+                            db.delete_transaction(real_idx, CURRENT_USER)
                             st.session_state.confirm_delete_idx = None
                             st.toast("Transaction deleted!", icon="🗑️")
                             st.rerun()
@@ -502,11 +620,8 @@ with tab_history:
         # Edit modal (shown below list when edit_idx is set)
         if st.session_state.edit_idx is not None:
             eidx = st.session_state.edit_idx
-            try:
-                all_data = db._load_data()
-                orig = all_data["transactions"][eidx]
-            except Exception:
-                orig = {}
+            match = indexed_df[indexed_df["_idx"].astype(str) == str(eidx)]
+            orig = match.iloc[0].to_dict() if not match.empty else {}
 
             st.markdown("---")
             st.markdown("#### ✏️ Edit Transaction")
@@ -532,7 +647,7 @@ with tab_history:
                     cancel_edit = st.form_submit_button("✖ Cancel", use_container_width=True)
 
             if save_edit:
-                db.update_transaction(eidx, e_date.strftime("%Y-%m-%d"), e_cat, e_amt, e_type, e_note)
+                db.update_transaction(eidx, e_date.strftime("%Y-%m-%d"), e_cat, e_amt, e_type, e_note, CURRENT_USER)
                 st.session_state.edit_idx = None
                 st.toast("Transaction updated!", icon="✅")
                 st.rerun()
@@ -567,8 +682,8 @@ with tab_analytics:
     st.markdown("### 📈 Analytics")
 
     # Fetch ALL data in ONE call each — avoid rate limits
-    all_txns_bulk   = db.get_transactions(None)  # all months, 1 API call
-    all_budgets_bulk = db.get_all_budgets()       # all budgets, 1 API call
+    all_txns_bulk   = db.get_transactions(None, CURRENT_USER)  # all months, 1 API call
+    all_budgets_bulk = db.get_all_budgets(CURRENT_USER)       # all budgets, 1 API call
 
     months_6 = get_month_options(6)
     monthly_data = []
@@ -640,6 +755,87 @@ with tab_analytics:
             "<p>Not enough data yet — add some transactions first!</p></div>",
             unsafe_allow_html=True)
 
+# ───────────────────────────────────────────────────────────────
+# TAB 5 · ADMIN (if user is admin)
+# ───────────────────────────────────────────────────────────────
+if IS_ADMIN:
+    with tab_admin:
+        st.markdown("### 👑 Admin Panel")
+        st.markdown("View all family members' financial data.")
+        st.markdown("---")
+
+        # Get all family members
+        all_users = db.get_all_users_list()
+        
+        if not all_users:
+            st.info("No family members yet.")
+        else:
+            # Summary table
+            st.markdown("#### 📊 Family Summary")
+            summary_df = db.get_all_users_summary()
+            if not summary_df.empty:
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            
+            # View individual member's data
+            st.markdown("#### 👤 View Member Data")
+            selected_member = st.selectbox("Select member:", all_users, key="admin_member_select")
+            
+            if selected_member:
+                member_month = st.selectbox(
+                    "📅 Month:",
+                    options=get_month_options(12),
+                    format_func=lambda x: get_month_label(x),
+                    index=0,
+                    key="admin_member_month",
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    member_expenses = db.get_expenses(member_month, selected_member)
+                    if not member_expenses.empty:
+                        st.markdown(f"**💸 {selected_member}'s Expenses**")
+                        st.dataframe(member_expenses, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(f"No expenses for {selected_member} this month.")
+                
+                with col2:
+                    member_investments = db.get_investments(member_month, selected_member)
+                    if not member_investments.empty:
+                        st.markdown(f"**📈 {selected_member}'s Investments**")
+                        st.dataframe(member_investments, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(f"No investments for {selected_member} this month.")
+                
+                st.markdown("---")
+                st.markdown(f"#### 💰 {selected_member}'s Budget")
+                member_budget = db.get_budget(member_month, selected_member)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(f"Budget ({member_month})", format_inr(member_budget))
+                with col2:
+                    member_spent = total_spent(member_expenses) if not member_expenses.empty else 0
+                    st.metric("Spent This Month", format_inr(member_spent))
+            
+            st.markdown("---")
+            
+            # All transactions view
+            st.markdown("#### 📜 All Family Transactions")
+            all_month = st.selectbox(
+                "📅 Filter by month:",
+                options=[None] + get_month_options(12),
+                format_func=lambda x: "All Time" if x is None else get_month_label(x),
+                index=0,
+                key="admin_all_txns_month",
+            )
+            
+            all_transactions = db.get_transactions(all_month, is_admin=True)
+            if not all_transactions.empty:
+                st.dataframe(all_transactions, use_container_width=True, hide_index=True)
+            else:
+                st.info("No transactions found.")
+
 with tab_settings:
     st.markdown("### ⚙️ Settings")
 
@@ -655,7 +851,7 @@ with tab_settings:
         st.markdown("#### Expense Categories")
         st.caption("These appear in the Add Transaction form and sidebar Quick Add.")
 
-        current_exp_cats = get_expense_categories(db)
+        current_exp_cats = get_expense_categories(db, CURRENT_USER)
 
         # Add new expense category
         with st.form("add_exp_cat_form", clear_on_submit=True):
@@ -674,7 +870,7 @@ with tab_settings:
             cat_name = new_exp_cat.strip()
             if cat_name not in current_exp_cats:
                 current_exp_cats.append(cat_name)
-                save_expense_categories(db, current_exp_cats)
+                save_expense_categories(db, current_exp_cats, CURRENT_USER)
                 st.toast(f"Added: {cat_name}", icon="✅")
                 st.rerun()
             else:
@@ -695,18 +891,18 @@ with tab_settings:
                 if st.button("🗑️", key=f"del_ecat_{i}", disabled=is_default,
                              help="Remove" if not is_default else "Default category (can't delete)"):
                     current_exp_cats.remove(cat)
-                    save_expense_categories(db, current_exp_cats)
+                    save_expense_categories(db, current_exp_cats, CURRENT_USER)
                     st.toast(f"Removed: {cat}", icon="✅")
                     st.rerun()
 
         if st.button("🔄 Reset to Defaults", key="reset_exp_cats"):
-            save_expense_categories(db, list(DEFAULT_EXPENSE_CATEGORIES))
+            save_expense_categories(db, list(DEFAULT_EXPENSE_CATEGORIES), CURRENT_USER)
             st.toast("Reset to default categories", icon="✅")
             st.rerun()
 
         st.markdown("---")
         st.markdown("#### Investment Categories")
-        current_inv_cats = get_investment_categories(db)
+        current_inv_cats = get_investment_categories(db, CURRENT_USER)
 
         with st.form("add_inv_cat_form", clear_on_submit=True):
             ic1, ic2 = st.columns([4, 1])
@@ -724,7 +920,7 @@ with tab_settings:
             cat_name = new_inv_cat.strip()
             if cat_name not in current_inv_cats:
                 current_inv_cats.append(cat_name)
-                save_investment_categories(db, current_inv_cats)
+                save_investment_categories(db, current_inv_cats, CURRENT_USER)
                 st.toast(f"Added: {cat_name}", icon="✅")
                 st.rerun()
             else:
@@ -743,12 +939,12 @@ with tab_settings:
                 if st.button("🗑️", key=f"del_icat_{i}", disabled=is_default,
                              help="Remove" if not is_default else "Default"):
                     current_inv_cats.remove(cat)
-                    save_investment_categories(db, current_inv_cats)
+                    save_investment_categories(db, current_inv_cats, CURRENT_USER)
                     st.toast(f"Removed: {cat}", icon="✅")
                     st.rerun()
 
         if st.button("🔄 Reset to Defaults", key="reset_inv_cats"):
-            save_investment_categories(db, list(DEFAULT_INVESTMENT_CATEGORIES))
+            save_investment_categories(db, list(DEFAULT_INVESTMENT_CATEGORIES), CURRENT_USER)
             st.toast("Reset to default categories", icon="✅")
             st.rerun()
 
@@ -769,7 +965,7 @@ with tab_settings:
                 limit_submitted = st.form_submit_button("➕ Set Limit", use_container_width=True)
 
         if limit_submitted:
-            db.set_category_limit(limit_cat, limit_amt)
+            db.set_category_limit(limit_cat, limit_amt, CURRENT_USER)
             st.toast(f"Limit set: {limit_cat} → {format_inr(limit_amt)}", icon="✅")
             st.rerun()
 
@@ -783,7 +979,7 @@ with tab_settings:
                     st.markdown(f"{format_inr(lim)}/month")
                 with lc3:
                     if st.button("🗑️", key=f"rmlimit_{cat}"):
-                        db.remove_category_limit(cat)
+                        db.remove_category_limit(cat, CURRENT_USER)
                         st.toast(f"Removed limit for {cat}", icon="✅")
                         st.rerun()
         else:
@@ -792,7 +988,8 @@ with tab_settings:
     # ─── Alert Threshold ──────────────────────────────────────
     with settings_tab3:
         st.markdown("#### ⚠️ Budget Alert Threshold")
-        threshold_val = int(db.get_config("warning_threshold", "20"))
+        threshold_key = f"warning_threshold__{CURRENT_USER}"
+        threshold_val = int(db.get_config(threshold_key, "20"))
         with st.form("threshold_form"):
             new_threshold = st.slider(
                 "Show warning when budget remaining is below",
@@ -800,7 +997,7 @@ with tab_settings:
             )
             threshold_saved = st.form_submit_button("💾 Save Threshold")
         if threshold_saved:
-            db.set_config("warning_threshold", str(new_threshold))
+            db.set_config(threshold_key, str(new_threshold))
             st.toast(f"Alert threshold set to {new_threshold}%", icon="✅")
             st.rerun()
 
@@ -811,15 +1008,9 @@ with tab_settings:
             f"<div style='background:rgba(255,255,255,0.04);border-radius:12px;padding:16px;"
             f"border:1px solid rgba(255,255,255,0.08);'>"
             f"<b>Mode:</b> {DB_MODE}<br>"
-            f"<b>Total transactions:</b> {len(db.get_transactions())}<br>"
+            f"<b>Total transactions:</b> {len(db.get_transactions(None, CURRENT_USER))}<br>"
             f"<b>Expense categories:</b> {len(EXPENSE_CATS)}<br>"
             f"<b>Investment categories:</b> {len(INVEST_CATS)}</div>",
             unsafe_allow_html=True,
         )
-        st.markdown("")
-        if st.button("🔄 Change Data Storage (Re-run Setup)", key="redo_setup_btn"):
-            from setup_wizard import SETUP_DONE_KEY
-            st.session_state[SETUP_DONE_KEY] = False
-            st.session_state.pop("show_sheets_setup", None)
-            st.rerun()
 
